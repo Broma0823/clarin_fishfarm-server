@@ -40,14 +40,29 @@ export const buildForecast = ({ series, monthsForward = 6, growthFactor = 1.05 }
   const lastMonth = extended.at(-1)?.month ?? 'Nov 2025'
   const lastDate = new Date(`01 ${lastMonth}`)
 
+  const lastValue = extended.at(-1).fryCount
+  const avgValue = extended.reduce((sum, { fryCount }) => sum + fryCount, 0) / extended.length
+  const minValue = Math.max(avgValue * 0.15, 5000) // At least 15% of average or 5000, whichever is higher
+  
   const projection = Array.from({ length: monthsForward }).map((_, offset) => {
     const x = n + offset + 1
     const baseline = slope * x + intercept
-    const adjusted = baseline * growthFactor
+    let adjusted = baseline * growthFactor
+    
+    // Ensure values don't go negative and maintain a minimum threshold
+    // If the trend is declining, apply a floor based on average value
+    if (adjusted < minValue) {
+      // For declining trends, maintain a minimum but allow gradual decline
+      const declineRate = Math.max(0.98, 1 - (offset * 0.002)) // Very gradual decline
+      adjusted = Math.max(minValue * Math.pow(declineRate, offset), minValue * 0.5)
+    }
+    
+    // Final safety check - ensure never negative
+    adjusted = Math.max(adjusted, minValue * 0.5)
 
     return {
       month: formatFutureLabel(lastDate, offset + 1),
-      baseline: round(baseline),
+      baseline: round(Math.max(baseline, 0)),
       adjusted: round(adjusted),
     }
   })

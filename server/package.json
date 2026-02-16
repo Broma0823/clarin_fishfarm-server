@@ -8,7 +8,9 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "migrate": "node scripts/runMigrations.js",
-    "import": "node scripts/importExcel.js --file"
+    "setup": "node scripts/setup-db.js",
+    "import": "node scripts/importExcel.js --file",
+    "delete-records": "node scripts/deleteRecords.js"
   },
   "keywords": [],
   "author": "",

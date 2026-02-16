@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import './App.css'
+import { MonitoringDashboardContent } from './components/MonitoringDashboard.jsx'
+import { CycleSummaryContent } from './components/CycleSummary.jsx'
+import { CyclesListContent } from './components/CyclesList.jsx'
 
 const defaultCredentials = {
   email: 'bfar.bohol@da.gov.ph',
@@ -56,6 +59,84 @@ function App() {
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
   const [breakdown, setBreakdown] = useState(null)
   const [toast, setToast] = useState('')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingRecord, setEditingRecord] = useState(null)
+  const [openDropdownId, setOpenDropdownId] = useState(null)
+  const [newRecord, setNewRecord] = useState({
+    name: '',
+    gender: '',
+    barangay: '',
+    municipality: '',
+    species: '',
+    quantity: '',
+    cost: '',
+    implementationType: '',
+    satisfaction: '',
+    dateImplemented: '',
+  })
+  const [selectedBeneficiary, setSelectedBeneficiary] = useState(null)
+  const [newBeneficiary, setNewBeneficiary] = useState({
+    name: '',
+    gender: '',
+    barangay: '',
+    municipality: '',
+  })
+  const [isCreatingBeneficiary, setIsCreatingBeneficiary] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showDatabaseTable, setShowDatabaseTable] = useState(false)
+  const [nameSuggestions, setNameSuggestions] = useState([])
+  const [showNameSuggestions, setShowNameSuggestions] = useState(false)
+  const [nameInputFocused, setNameInputFocused] = useState(false)
+  const nameSearchTimeoutRef = useRef(null)
+  
+  // Monitoring Dashboard State
+  const [monitoringParameters, setMonitoringParameters] = useState([])
+  const [loadingMonitoring, setLoadingMonitoring] = useState(false)
+  const [showMonitoringModal, setShowMonitoringModal] = useState(false)
+  const [editingMonitoring, setEditingMonitoring] = useState(null)
+  const [currentCycleId, setCurrentCycleId] = useState('')
+  const [weatherData, setWeatherData] = useState(null)
+  const [loadingWeather, setLoadingWeather] = useState(false)
+  const [deviceReadings, setDeviceReadings] = useState(null) // Auto-collected water quality parameters
+  const [loadingDeviceReadings, setLoadingDeviceReadings] = useState(false)
+  
+  // Cycle Summary State
+  const [showCycleSummary, setShowCycleSummary] = useState(false)
+  const [showCyclesList, setShowCyclesList] = useState(false)
+  const [selectedCycleForSummary, setSelectedCycleForSummary] = useState(null)
+  const [cyclesListRefreshTrigger, setCyclesListRefreshTrigger] = useState(0)
+  
+  const [newMonitoringRecord, setNewMonitoringRecord] = useState({
+    cycleId: '',
+    cycleStartDate: '',
+    waterTemperature: '',
+    dissolvedOxygen: '',
+    phLevel: '',
+    numberOfBreeders: '',
+    breederRatio: '',
+    feedAllocation: '',
+    notes: '',
+  })
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Check if click is outside any dropdown
+      if (!event.target.closest('.action-dropdown') && !event.target.closest('button[title="Actions"]')) {
+        setOpenDropdownId(null)
+      }
+    }
+
+    if (openDropdownId !== null) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [openDropdownId])
 
   const handleLogin = (event) => {
     event.preventDefault()
@@ -84,7 +165,7 @@ function App() {
         if (selectedMonth) params.append('month', selectedMonth)
 
         const response = await fetch(
-          `${API_BASE_URL}/beneficiaries?${params.toString()}`,
+          `${API_BASE_URL}/distributions?${params.toString()}`,
           { signal: controller.signal }
         )
         const payload = await response.json()
@@ -126,9 +207,179 @@ function App() {
 
       if (productionRes.ok) {
         const productionPayload = await productionRes.json()
-        setProduction(productionPayload.data ?? [])
+        const apiProduction = productionPayload.data ?? []
+        
+        // Create a set of existing dates from API data (normalize to YYYY-MM format)
+        const existingDates = new Set()
+        apiProduction.forEach(entry => {
+          const d = new Date(entry.month ?? entry.snapshot_month)
+          if (!Number.isNaN(d.getTime())) {
+            const year = d.getFullYear()
+            const month = d.getMonth()
+            existingDates.add(`${year}-${month}`)
+          }
+        })
+        
+        // Generate placeholder actual production data for 2024-2027
+        // These will be used to compare with predicted values
+        const placeholderActual = []
+        
+        // Calculate base values from actual data pattern (2019-2023)
+        // Analyze historical data to extract monthly patterns
+        const sortedApiProduction = [...apiProduction].sort((a, b) => {
+          const dateA = new Date(a.month ?? a.snapshot_month)
+          const dateB = new Date(b.month ?? b.snapshot_month)
+          return dateA - dateB
+        })
+        
+        // Extract data from 2019-2023 only for pattern analysis
+        const historicalData = sortedApiProduction.filter(entry => {
+          const date = new Date(entry.month ?? entry.snapshot_month)
+          const year = date.getFullYear()
+          return year >= 2019 && year <= 2023
+        })
+        
+        // Calculate monthly averages from 2019-2023 to understand seasonal pattern
+        const monthlyTotals = Array(12).fill(0)
+        const monthlyCounts = Array(12).fill(0)
+        
+        historicalData.forEach(entry => {
+          const date = new Date(entry.month ?? entry.snapshot_month)
+          const monthIndex = date.getMonth()
+          const value = entry.fryCount ?? entry.fry_count ?? 0
+          if (value > 0) {
+            monthlyTotals[monthIndex] += value
+            monthlyCounts[monthIndex] += 1
+          }
+        })
+        
+        // Calculate average per month
+        const monthlyAverages = monthlyTotals.map((total, idx) => 
+          monthlyCounts[idx] > 0 ? total / monthlyCounts[idx] : 0
+        )
+        
+        // Calculate overall average from historical data
+        const historicalValues = historicalData.map(e => e.fryCount ?? e.fry_count ?? 0).filter(v => v > 0)
+        const avgValue = historicalValues.length > 0 
+          ? historicalValues.reduce((sum, v) => sum + v, 0) / historicalValues.length 
+          : 80000 // Fallback average
+        
+        // Calculate seasonal factors based on actual monthly averages
+        // Normalize monthly averages to create seasonal pattern
+        const seasonalFactors = monthlyAverages.map(avg => 
+          avg > 0 ? avg / avgValue : 1.0
+        )
+        
+        // If no historical data, use fallback pattern
+        if (historicalValues.length === 0) {
+          seasonalFactors.splice(0, seasonalFactors.length, ...[0.95, 0.97, 1.0, 1.05, 1.08, 1.06, 1.04, 1.02, 1.0, 0.98, 0.96, 0.94])
+        }
+        
+        // Add placeholder for 2024 (actual only, no forecast)
+        // Always add all 12 months of 2024 as placeholder values
+        for (let month = 0; month < 12; month++) {
+          const dateKey = `2024-${month}`
+          // Calculate value based on average and seasonal pattern
+          const value = Math.round(avgValue * seasonalFactors[month] * 0.95) // 5% lower than average for 2024
+          const date = new Date(2024, month, 1)
+          placeholderActual.push({
+            month: date.toISOString().split('T')[0],
+            snapshot_month: date.toISOString().split('T')[0],
+            fryCount: value,
+            fry_count: value,
+          })
+        }
+        
+        // Add placeholder for 2025-2027
+        for (let year = 2025; year <= 2027; year++) {
+          for (let month = 0; month < 12; month++) {
+            const dateKey = `${year}-${month}`
+            // Always add placeholder for 2025-2027 if no actual data exists for this month
+            if (!existingDates.has(dateKey)) {
+              const yearGrowth = 1 + ((year - 2025) * 0.03) // 3% growth per year (more conservative)
+              const value = Math.round(avgValue * seasonalFactors[month] * yearGrowth)
+              const date = new Date(year, month, 1)
+              placeholderActual.push({
+                month: date.toISOString().split('T')[0],
+                snapshot_month: date.toISOString().split('T')[0],
+                fryCount: value,
+                fry_count: value,
+              })
+            }
+          }
+        }
+        
+        // Combine API data with placeholder actual data
+        // Use a Map to ensure API data takes precedence over placeholders
+        const productionMap = new Map()
+        
+        // First add placeholders (ensures all 2024 months are present)
+        placeholderActual.forEach(entry => {
+          const dateKey = entry.month ?? entry.snapshot_month
+          productionMap.set(dateKey, entry)
+        })
+        
+        // Then add API data (will overwrite placeholders if they exist)
+        apiProduction.forEach(entry => {
+          const dateKey = entry.month ?? entry.snapshot_month
+          productionMap.set(dateKey, entry)
+        })
+        
+        // Convert back to array and sort
+        setProduction(Array.from(productionMap.values()).sort((a, b) => {
+          const dateA = new Date(a.month ?? a.snapshot_month)
+          const dateB = new Date(b.month ?? b.snapshot_month)
+          return dateA - dateB
+        }))
       } else {
-        setProduction([])
+        // If API fails, still add placeholders for 2024-2027
+        const placeholderActual = []
+        // Use fallbackProduction to calculate pattern
+        const fallbackValues = fallbackProduction.map(e => e.fryCount)
+        const avgValue = fallbackValues.length > 0 
+          ? fallbackValues.reduce((sum, v) => sum + v, 0) / fallbackValues.length 
+          : 80000
+        
+        // Calculate seasonal factors from fallback data
+        // Fallback data: Jan: 65000, Feb: 69000, Mar: 71200, Apr: 77000, May: 80500, Jun: 79000
+        const fallbackFactors = [
+          65000/avgValue, 69000/avgValue, 71200/avgValue, 77000/avgValue, 
+          80500/avgValue, 79000/avgValue, 
+          // Extrapolate for remaining months based on pattern
+          0.98, 0.96, 0.94, 0.92, 0.90
+        ]
+        const seasonalFactors = fallbackFactors.length === 12 
+          ? fallbackFactors 
+          : [0.95, 0.97, 1.0, 1.05, 1.08, 1.06, 1.04, 1.02, 1.0, 0.98, 0.96, 0.94]
+        
+        // Add placeholder for 2024 (actual only)
+        // Always add all 12 months of 2024 as placeholder values
+        for (let month = 0; month < 12; month++) {
+          const value = Math.round(avgValue * seasonalFactors[month] * 0.95) // 5% lower than average for 2024
+          const date = new Date(2024, month, 1)
+          placeholderActual.push({
+            month: date.toISOString().split('T')[0],
+            snapshot_month: date.toISOString().split('T')[0],
+            fryCount: value,
+            fry_count: value,
+          })
+        }
+        
+        // Add placeholder for 2025-2027
+        for (let year = 2025; year <= 2027; year++) {
+          for (let month = 0; month < 12; month++) {
+            const yearGrowth = 1 + ((year - 2025) * 0.03) // 3% growth per year
+            const value = Math.round(avgValue * seasonalFactors[month] * yearGrowth)
+            const date = new Date(year, month, 1)
+            placeholderActual.push({
+              month: date.toISOString().split('T')[0],
+              snapshot_month: date.toISOString().split('T')[0],
+              fryCount: value,
+              fry_count: value,
+            })
+          }
+        }
+        setProduction(placeholderActual)
       }
 
       if (breakdownRes.ok) {
@@ -191,61 +442,765 @@ function App() {
     }
   }, [summary, records])
 
-  const timeline = useMemo(() => {
-    if (production.length) {
-      return production.map((entry) => ({
-        month: new Date(entry.month ?? entry.snapshot_month).toLocaleDateString('en-PH', {
-          month: 'short',
-          year: 'numeric',
-        }),
-        fryCount: entry.fryCount ?? entry.fry_count ?? 0,
-      }))
+  const filteredYearlyBreakdown = useMemo(() => {
+    if (!breakdown || !breakdown.yearly) return []
+    let filtered = breakdown.yearly
+    if (selectedYear) {
+      filtered = filtered.filter((year) => year.year.toString() === selectedYear)
     }
-    return fallbackProduction
-  }, [production])
+    return filtered
+  }, [breakdown, selectedYear])
 
-  const maxTimelineValue = useMemo(
-    () => Math.max(...timeline.map((entry) => entry.fryCount), 1),
-    [timeline]
-  )
+  const filteredMonthlyBreakdown = useMemo(() => {
+    if (!breakdown || !breakdown.monthly) return []
+    let filtered = breakdown.monthly
+    if (selectedYear) {
+      filtered = filtered.filter((month) => month.year.toString() === selectedYear)
+    }
+    if (selectedMonth) {
+      filtered = filtered.filter((month) => month.month.toString() === selectedMonth)
+    }
+    return filtered
+  }, [breakdown, selectedYear, selectedMonth])
+
+  // Fetch monitoring parameters
+  useEffect(() => {
+    if (!user || activePanel !== 'monitoring') return
+    
+    const fetchMonitoringParameters = async () => {
+      setLoadingMonitoring(true)
+      try {
+        const params = new URLSearchParams()
+        if (currentCycleId) params.append('cycleId', currentCycleId)
+        
+        const response = await fetch(`${API_BASE_URL}/monitoring?${params.toString()}`)
+        const payload = await response.json()
+        if (response.ok) {
+          setMonitoringParameters(payload.data ?? [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch monitoring parameters:', err)
+        setToast('Failed to load monitoring parameters')
+      } finally {
+        setLoadingMonitoring(false)
+      }
+    }
+    
+    fetchMonitoringParameters()
+  }, [user, activePanel, currentCycleId])
+
+  // Fetch weather data
+  useEffect(() => {
+    if (!user || activePanel !== 'monitoring') return
+    
+    const fetchWeather = async () => {
+      setLoadingWeather(true)
+      try {
+        // Using OpenWeatherMap API (free tier)
+        // Note: You'll need to get an API key from openweathermap.org
+        // For now, using a mock/demo approach
+        const API_KEY = import.meta.env.VITE_WEATHER_API_KEY || ''
+        // Clarin, Bohol coordinates approximately: 9.95°N, 123.95°E
+        const lat = 9.95
+        const lon = 123.95
+        
+        if (API_KEY) {
+          const response = await fetch(
+            `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
+          )
+          if (response.ok) {
+            const data = await response.json()
+            setWeatherData({
+              temperature: data.main.temp,
+              humidity: data.main.humidity,
+              condition: data.weather[0].main,
+              windSpeed: data.wind?.speed || 0,
+            })
+          }
+        } else {
+          // Mock data for development
+          setWeatherData({
+            temperature: 28.5,
+            humidity: 75,
+            condition: 'Clear',
+            windSpeed: 12.5,
+          })
+        }
+      } catch (err) {
+        console.error('Failed to fetch weather:', err)
+        // Set mock data on error
+        setWeatherData({
+          temperature: 28.5,
+          humidity: 75,
+          condition: 'Clear',
+          windSpeed: 12.5,
+        })
+      } finally {
+        setLoadingWeather(false)
+      }
+    }
+    
+    fetchWeather()
+    // Refresh weather every 10 minutes
+    const interval = setInterval(fetchWeather, 600000)
+    return () => clearInterval(interval)
+  }, [user, activePanel])
+
+  // Fetch water quality parameters from monitoring device
+  useEffect(() => {
+    if (!user || activePanel !== 'monitoring') return
+    
+    const fetchDeviceReadings = async () => {
+      setLoadingDeviceReadings(true)
+      try {
+        // TODO: Replace with actual device API endpoint
+        // For now, simulating device readings
+        // In production, this would be: const response = await fetch(`${API_BASE_URL}/monitoring/device-readings`)
+        
+        // Simulate device readings with realistic values for tilapia farming
+        // Water Temperature: 26-30°C optimal for tilapia
+        // Dissolved Oxygen: 5-8 mg/L optimal
+        // pH Level: 6.5-8.5 optimal for tilapia
+        
+        // Simulate slight variations in readings
+        const baseTemp = 28.0
+        const baseDO = 6.5
+        const basePH = 7.2
+        
+        // Add small random variations (±1°C, ±0.5 mg/L, ±0.2 pH)
+        const waterTemp = (baseTemp + (Math.random() * 2 - 1)).toFixed(1)
+        const dissolvedOxygen = (baseDO + (Math.random() * 1 - 0.5)).toFixed(2)
+        const phLevel = (basePH + (Math.random() * 0.4 - 0.2)).toFixed(2)
+        
+        setDeviceReadings({
+          waterTemperature: parseFloat(waterTemp),
+          dissolvedOxygen: parseFloat(dissolvedOxygen),
+          phLevel: parseFloat(phLevel),
+          timestamp: new Date().toISOString(),
+        })
+        
+        // In production, uncomment this:
+        // const response = await fetch(`${API_BASE_URL}/monitoring/device-readings`)
+        // if (response.ok) {
+        //   const data = await response.json()
+        //   setDeviceReadings(data)
+        // }
+      } catch (err) {
+        console.error('Failed to fetch device readings:', err)
+        // Set fallback values on error
+        setDeviceReadings({
+          waterTemperature: 28.0,
+          dissolvedOxygen: 6.5,
+          phLevel: 7.2,
+          timestamp: new Date().toISOString(),
+        })
+      } finally {
+        setLoadingDeviceReadings(false)
+      }
+    }
+    
+    fetchDeviceReadings()
+    // Refresh device readings every 30 seconds (typical for monitoring devices)
+    const interval = setInterval(fetchDeviceReadings, 30000)
+    return () => clearInterval(interval)
+  }, [user, activePanel])
 
   const classificationCopy = {
     individual: 'Individuals',
     group: 'Groups/Associations',
   }
 
+  // Monitoring Dashboard Handlers
+  const handleAddMonitoringRecord = async (event) => {
+    event.preventDefault()
+    setIsSubmitting(true)
+    try {
+      // Use auto-collected device readings for water quality parameters
+      const recordData = {
+        cycleId: newMonitoringRecord.cycleId || `CYCLE-${Date.now()}`,
+        cycleStartDate: newMonitoringRecord.cycleStartDate,
+        waterTemperature: deviceReadings?.waterTemperature || null, // Auto-collected from device
+        dissolvedOxygen: deviceReadings?.dissolvedOxygen || null, // Auto-collected from device
+        phLevel: deviceReadings?.phLevel || null, // Auto-collected from device
+        numberOfBreeders: newMonitoringRecord.numberOfBreeders ? Number(newMonitoringRecord.numberOfBreeders) : null,
+        breederRatio: newMonitoringRecord.breederRatio || null,
+        feedAllocation: newMonitoringRecord.feedAllocation ? Number(newMonitoringRecord.feedAllocation) : null,
+        weatherTemperature: weatherData?.temperature || null,
+        weatherHumidity: weatherData?.humidity || null,
+        weatherCondition: weatherData?.condition || null,
+        weatherWindSpeed: weatherData?.windSpeed || null,
+        notes: newMonitoringRecord.notes || null,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/monitoring`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recordData),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.error || 'Failed to add monitoring record')
+      }
+
+      setShowMonitoringModal(false)
+      setNewMonitoringRecord({
+        cycleId: '',
+        cycleStartDate: '',
+        waterTemperature: '',
+        dissolvedOxygen: '',
+        phLevel: '',
+        numberOfBreeders: '',
+        breederRatio: '',
+        feedAllocation: '',
+        notes: '',
+      })
+      setToast('Monitoring record added successfully')
+      
+      // Refresh monitoring parameters
+      const refreshResponse = await fetch(`${API_BASE_URL}/monitoring`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setMonitoringParameters(refreshPayload.data ?? [])
+        // Trigger refresh of cycles list if it's open
+        setCyclesListRefreshTrigger(prev => prev + 1)
+      }
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleEditMonitoringRecord = (record) => {
+    if (!record) {
+      setEditingMonitoring(null)
+      return
+    }
+    setEditingMonitoring(record)
+    setNewMonitoringRecord({
+      cycleId: record.cycleId,
+      cycleStartDate: record.cycleStartDate,
+      waterTemperature: '', // Not editable - auto-collected
+      dissolvedOxygen: '', // Not editable - auto-collected
+      phLevel: '', // Not editable - auto-collected
+      numberOfBreeders: record.numberOfBreeders?.toString() || '',
+      breederRatio: record.breederRatio || '',
+      feedAllocation: record.feedAllocation?.toString() || '',
+      notes: record.notes || '',
+    })
+    setShowMonitoringModal(true)
+  }
+
+  const handleUpdateMonitoringRecord = async (event) => {
+    event.preventDefault()
+    if (!editingMonitoring) return
+    
+    setIsSubmitting(true)
+    try {
+      // Keep existing auto-collected values, only update user-inputted fields
+      const recordData = {
+        cycleId: newMonitoringRecord.cycleId,
+        cycleStartDate: newMonitoringRecord.cycleStartDate,
+        waterTemperature: editingMonitoring.waterTemperature || deviceReadings?.waterTemperature || null, // Keep existing or use current device reading
+        dissolvedOxygen: editingMonitoring.dissolvedOxygen || deviceReadings?.dissolvedOxygen || null, // Keep existing or use current device reading
+        phLevel: editingMonitoring.phLevel || deviceReadings?.phLevel || null, // Keep existing or use current device reading
+        numberOfBreeders: newMonitoringRecord.numberOfBreeders ? Number(newMonitoringRecord.numberOfBreeders) : null,
+        breederRatio: newMonitoringRecord.breederRatio || null,
+        feedAllocation: newMonitoringRecord.feedAllocation ? Number(newMonitoringRecord.feedAllocation) : null,
+        weatherTemperature: weatherData?.temperature || null,
+        weatherHumidity: weatherData?.humidity || null,
+        weatherCondition: weatherData?.condition || null,
+        weatherWindSpeed: weatherData?.windSpeed || null,
+        notes: newMonitoringRecord.notes || null,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/monitoring/${editingMonitoring.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recordData),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.error || 'Failed to update monitoring record')
+      }
+
+      setShowMonitoringModal(false)
+      setEditingMonitoring(null)
+      setNewMonitoringRecord({
+        cycleId: '',
+        cycleStartDate: '',
+        waterTemperature: '',
+        dissolvedOxygen: '',
+        phLevel: '',
+        numberOfBreeders: '',
+        breederRatio: '',
+        feedAllocation: '',
+        notes: '',
+      })
+      setToast('Monitoring record updated successfully')
+      
+      // Refresh monitoring parameters
+      const refreshResponse = await fetch(`${API_BASE_URL}/monitoring`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setMonitoringParameters(refreshPayload.data ?? [])
+        // Trigger refresh of cycles list if it's open
+        setCyclesListRefreshTrigger(prev => prev + 1)
+      }
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteMonitoringRecord = async (id) => {
+    if (!confirm('Are you sure you want to delete this monitoring record?')) return
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/monitoring/${id}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.error || 'Failed to delete monitoring record')
+      }
+
+      setToast('Monitoring record deleted successfully')
+      setMonitoringParameters(monitoringParameters.filter((p) => p.id !== id))
+      // Trigger refresh of cycles list if it's open
+      setCyclesListRefreshTrigger(prev => prev + 1)
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    }
+  }
+
+  const handleLogout = () => {
+    setUser(null)
+    setActivePanel(null)
+    setShowDatabaseTable(false)
+    setToast('')
+    setKeyword('')
+    setSelectedYear('')
+    setSelectedMonth('')
+    setClassification('individual')
+    setMonitoringParameters([])
+    setCurrentCycleId('')
+    setWeatherData(null)
+  }
+
+  // Search for similar names as user types
+  const searchSimilarNames = async (name) => {
+    if (!name || name.trim().length < 2) {
+      setNameSuggestions([])
+      setShowNameSuggestions(false)
+      return
+    }
+
+    try {
+      const params = new URLSearchParams({
+        name: name.trim(),
+        classification: classification || 'individual'
+      })
+      const response = await fetch(`${API_BASE_URL}/beneficiaries/search-similar?${params.toString()}`)
+      if (response.ok) {
+        const payload = await response.json()
+        setNameSuggestions(payload.data || [])
+        setShowNameSuggestions(payload.data && payload.data.length > 0 && nameInputFocused)
+      }
+    } catch (err) {
+      console.error('Error searching similar names:', err)
+      setNameSuggestions([])
+    }
+  }
+
+  // Handle name input change with debouncing
+  const handleNameChange = (value) => {
+    setSelectedBeneficiary(null)
+    setNewRecord({ ...newRecord, name: value })
+    // Clear previous timeout
+    if (nameSearchTimeoutRef.current) {
+      clearTimeout(nameSearchTimeoutRef.current)
+    }
+    // Debounce the search
+    nameSearchTimeoutRef.current = setTimeout(() => {
+      searchSimilarNames(value)
+    }, 300)
+  }
+
+  // Select a suggested name and auto-fill constant information
+  const selectSuggestedName = async (suggestion) => {
+    const nameToUse = suggestion.name || suggestion
+    setNewRecord({ ...newRecord, name: nameToUse })
+    setNameSuggestions([])
+    setShowNameSuggestions(false)
+    
+    // If suggestion has beneficiary info, auto-fill constant fields
+    if (suggestion.beneficiary) {
+      const beneficiary = suggestion.beneficiary
+      setSelectedBeneficiary(beneficiary)
+      setNewRecord(prev => ({
+        ...prev,
+        name: beneficiary.name || prev.name,
+        gender: beneficiary.gender || prev.gender,
+        barangay: beneficiary.barangay || prev.barangay,
+        municipality: beneficiary.municipality || prev.municipality,
+        // Keep non-constant fields empty: species, quantity, cost, implementationType, satisfaction, dateImplemented
+      }))
+    } else {
+      // Fetch full beneficiary info if not included in suggestion
+      try {
+        const params = new URLSearchParams({
+          name: nameToUse,
+          classification: classification || 'individual'
+        })
+        const response = await fetch(`${API_BASE_URL}/beneficiaries/by-name?${params.toString()}`)
+        if (response.ok) {
+          const payload = await response.json()
+          const beneficiary = payload.data
+          if (beneficiary) {
+            setSelectedBeneficiary(beneficiary)
+            setNewRecord(prev => ({
+              ...prev,
+              name: beneficiary.name || prev.name,
+              gender: beneficiary.gender || prev.gender,
+              barangay: beneficiary.barangay || prev.barangay,
+              municipality: beneficiary.municipality || prev.municipality,
+              // Keep non-constant fields empty: species, quantity, cost, implementationType, satisfaction, dateImplemented
+            }))
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching beneficiary info:', err)
+        // Just set the name if fetch fails
+        setNewRecord({ ...newRecord, name: nameToUse })
+      }
+    }
+  }
+
+  const clearSelectedBeneficiary = () => {
+    setSelectedBeneficiary(null)
+    setNewRecord(prev => ({
+      ...prev,
+      name: '',
+      gender: '',
+      barangay: '',
+      municipality: '',
+    }))
+  }
+
+  const handleCreateBeneficiary = async (event) => {
+    event.preventDefault()
+    if (!newBeneficiary.name.trim()) {
+      setToast('Please enter a beneficiary name before saving.')
+      return
+    }
+
+    setIsCreatingBeneficiary(true)
+    try {
+      const payload = {
+        excelId: `BEN-${Date.now()}`,
+        classification,
+        name: newBeneficiary.name.trim(),
+        gender: newBeneficiary.gender || null,
+        barangay: newBeneficiary.barangay || null,
+        municipality: newBeneficiary.municipality || null,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/beneficiaries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const resultBody = await response.json()
+      if (!response.ok) {
+        throw new Error(resultBody.error || 'Failed to save beneficiary')
+      }
+
+      const saved = resultBody.data
+      setSelectedBeneficiary(saved)
+      setNewRecord(prev => ({
+        ...prev,
+        name: saved?.name || prev.name,
+        gender: saved?.gender || '',
+        barangay: saved?.barangay || '',
+        municipality: saved?.municipality || '',
+      }))
+      setNewBeneficiary({
+        name: '',
+        gender: '',
+        barangay: '',
+        municipality: '',
+      })
+      setNameSuggestions([])
+      setShowNameSuggestions(false)
+      setToast('Beneficiary saved. Now add distribution details.')
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    } finally {
+      setIsCreatingBeneficiary(false)
+    }
+  }
+
+  const handleAddRecord = async (event) => {
+    event.preventDefault()
+    if (!selectedBeneficiary?.id) {
+      setToast('Select an existing beneficiary or add one before saving the distribution.')
+      return
+    }
+    setIsSubmitting(true)
+    try {
+      const recordData = {
+        excelId: `MANUAL-${Date.now()}`,
+        beneficiaryId: selectedBeneficiary.id,
+        species: newRecord.species || null,
+        quantity: newRecord.quantity ? Number(newRecord.quantity) : null,
+        cost: newRecord.cost ? Number(newRecord.cost) : null,
+        implementationType: newRecord.implementationType || null,
+        satisfaction: newRecord.satisfaction || null,
+        dateImplemented: newRecord.dateImplemented || null,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/distributions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recordData),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.error || 'Failed to add record')
+      }
+
+      const payload = await response.json()
+      
+      // Show message if name was normalized
+      let successMessage = 'Record added successfully!'
+      if (payload.normalized) {
+        successMessage = `Record added successfully! Name normalized from "${payload.normalized.original}" to "${payload.normalized.normalized}" to match existing records.`
+      }
+
+      setShowAddModal(false)
+      setSelectedBeneficiary(null)
+      setNewRecord({
+        name: '',
+        gender: '',
+        barangay: '',
+        municipality: '',
+        species: '',
+        quantity: '',
+        cost: '',
+        implementationType: '',
+        satisfaction: '',
+        dateImplemented: '',
+      })
+      setNewBeneficiary({
+        name: '',
+        gender: '',
+        barangay: '',
+        municipality: '',
+      })
+      setNameSuggestions([])
+      setShowNameSuggestions(false)
+      setToast(successMessage)
+      
+      // Refresh records
+      const params = new URLSearchParams({ classification })
+      if (selectedYear) params.append('year', selectedYear)
+      if (selectedMonth) params.append('month', selectedMonth)
+      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setRecords(refreshPayload.data ?? [])
+      }
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteRecord = async (recordId) => {
+    if (!window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/distributions/${recordId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.error || 'Failed to delete record')
+      }
+
+      setToast('Record deleted successfully!')
+      setOpenDropdownId(null) // Close dropdown
+      
+      // Refresh records
+      const params = new URLSearchParams({ classification })
+      if (selectedYear) params.append('year', selectedYear)
+      if (selectedMonth) params.append('month', selectedMonth)
+      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setRecords(refreshPayload.data ?? [])
+      }
+      
+      // Refresh summary
+      void bootstrapSummary()
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    }
+  }
+
+  const handleEditRecord = (record) => {
+    if (record.beneficiary_id || record.beneficiaryId) {
+      setSelectedBeneficiary({
+        id: record.beneficiary_id || record.beneficiaryId,
+        name: record.name,
+        gender: record.gender || '',
+        barangay: record.barangay || '',
+        municipality: record.municipality || '',
+      })
+    } else {
+      setSelectedBeneficiary(null)
+    }
+
+    setEditingRecord(record)
+    setNewRecord({
+      name: record.name || '',
+      gender: record.gender || '',
+      barangay: record.barangay || '',
+      municipality: record.municipality || '',
+      species: record.species || '',
+      quantity: record.quantity?.toString() || '',
+      cost: record.cost?.toString() || '',
+      implementationType: record.implementationType || record.implementation_type || '',
+      satisfaction: record.satisfaction || '',
+      dateImplemented: record.dateImplemented || record.date_implemented || '',
+    })
+    setShowEditModal(true)
+    setOpenDropdownId(null) // Close dropdown
+  }
+
+  const handleUpdateRecord = async (event) => {
+    event.preventDefault()
+    setIsSubmitting(true)
+
+    try {
+      const payload = {
+        species: newRecord.species || null,
+        quantity: newRecord.quantity ? Number(newRecord.quantity) : null,
+        cost: newRecord.cost ? Number(newRecord.cost) : null,
+        implementationType: newRecord.implementationType || null,
+        satisfaction: newRecord.satisfaction || null,
+        dateImplemented: newRecord.dateImplemented || null,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/distributions/${editingRecord.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const errorPayload = await response.json()
+        throw new Error(errorPayload.error || 'Failed to update record')
+      }
+
+      setShowEditModal(false)
+      setEditingRecord(null)
+      setToast('Record updated successfully!')
+      
+      // Refresh records
+      const params = new URLSearchParams({ classification })
+      if (selectedYear) params.append('year', selectedYear)
+      if (selectedMonth) params.append('month', selectedMonth)
+      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setRecords(refreshPayload.data ?? [])
+      }
+      
+      // Refresh summary
+      void bootstrapSummary()
+    } catch (err) {
+      console.error(err)
+      setToast(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   if (!user) {
     return (
       <div className="screen login-screen">
-        <section className="login-card">
-          <div className="login-hero">
-            <p className="eyebrow">Bureau of Fisheries and Aquatic Resources</p>
-            <h1>BFAR Bohol Digital Hatchery Console</h1>
-            <p>
-              Securely monitor broodstock inventory, hatchery releases, and
-              projected tilapia fry availability across provincial facilities.
-            </p>
-            <ul>
-              <li>Unified data capture for all hatcheries</li>
-              <li>Automated fry production forecasting</li>
-              <li>Actionable insights for allocation planning</li>
-            </ul>
-          </div>
-
-          <form className="login-panel" onSubmit={handleLogin}>
-            <div>
-              <p className="eyebrow">Authorized Personnel Only</p>
-              <h2>Sign in</h2>
-              <p className="muted">
-                Use your BFAR credentials to continue to the dashboard.
+        <div className="login-container">
+          <div className="login-welcome">
+            <div className="welcome-header">
+              <div className="logo-placeholder">
+                <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5"></path>
+                  <path d="M2 12l10 5 10-5"></path>
+                </svg>
+              </div>
+              <h1>Clarin Freshwater Fish Farm</h1>
+              <p className="subtitle">Database Management & Forecasting System</p>
+            </div>
+            
+            <div className="welcome-content">
+              <div className="feature-item">
+                <div className="feature-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <line x1="9" y1="3" x2="9" y2="21"></line>
+                    <line x1="3" y1="9" x2="21" y2="9"></line>
+                  </svg>
+                </div>
+                <div>
+                  <h3>Comprehensive Database</h3>
+                  <p>Manage beneficiary records, track distributions, and maintain detailed information about freshwater fish farm operations across municipalities.</p>
+                </div>
+              </div>
+              
+              <div className="feature-item">
+                <div className="feature-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                </div>
+                <div>
+                  <h3>Production Forecasting</h3>
+                  <p>Analyze historical data and generate accurate forecasts for quarterly, monthly, and annual tilapia fry production to support planning and allocation.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="welcome-footer">
+              <p className="muted small">
+                <strong>Bureau of Fisheries and Aquatic Resources</strong><br />
+                Bohol Provincial Office
               </p>
             </div>
-
+          </div>
+          <form className="login-form" onSubmit={handleLogin}>
             <label className="field">
-              <span>Email address</span>
+              <span>email</span>
               <input
                 type="email"
-                placeholder="name@bfar.gov.ph"
+                placeholder="Enter your email"
                 value={credentials.email}
                 onChange={(event) =>
                   setCredentials((prev) => ({
@@ -256,12 +1211,11 @@ function App() {
                 required
               />
             </label>
-
             <label className="field">
-              <span>Access code</span>
+              <span>password</span>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="Enter your password"
                 value={credentials.password}
                 onChange={(event) =>
                   setCredentials((prev) => ({
@@ -272,18 +1226,12 @@ function App() {
                 required
               />
             </label>
-
             {error && <p className="error">{error}</p>}
-
-            <button type="submit" className="primary">
-              Enter dashboard
+            <button type="submit" className="login-button">
+              login
             </button>
-
-            <p className="muted small">
-              Having trouble? Dial (038) 444-1425 or email bfar.bohol@da.gov.ph.
-            </p>
           </form>
-        </section>
+        </div>
       </div>
     )
   }
@@ -293,52 +1241,50 @@ function App() {
       <div className="screen selection-screen">
         <div className="selection-container">
           <div className="selection-header">
-            <p className="eyebrow">BFAR / Bohol</p>
-            <h1>Welcome, {user.email}</h1>
-            <p className="muted">Select a module to continue</p>
+            <h1>Clarin Freshwater Fish Farm Database and Data Collection</h1>
+            <p className="muted">Welcome back! Select an option to proceed.</p>
           </div>
 
-          <div className="selection-grid">
+          <div className="home-actions">
             <button
-              className="selection-card"
+              className="home-action-button database-button"
               onClick={() => setActivePanel('database')}
             >
-              <h2>Database</h2>
+              <div className="button-icon-container">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                  <line x1="9" y1="3" x2="9" y2="21"></line>
+                  <line x1="3" y1="9" x2="21" y2="9"></line>
+                  <rect x="4" y="10" width="4" height="8" fill="currentColor" opacity="0.3"></rect>
+                  <rect x="10" y="6" width="4" height="12" fill="currentColor" opacity="0.5"></rect>
+                  <rect x="16" y="4" width="4" height="14" fill="currentColor" opacity="0.7"></rect>
+                </svg>
+              </div>
+              <h2>Summary and Reports</h2>
               <p className="muted small">
-                Access and search beneficiary records, filter by year and month
+                View and manage beneficiary records, summary statistics, and reports
               </p>
             </button>
 
             <button
-              className="selection-card"
-              onClick={() => setActivePanel('forecast')}
+              className="home-action-button statistics-button"
+              onClick={() => setActivePanel('monitoring')}
             >
-              <h2>Predictive Analysis</h2>
+              <div className="button-icon-container">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                  <circle cx="8" cy="8" r="1"></circle>
+                  <circle cx="16" cy="8" r="1"></circle>
+                  <line x1="8" y1="12" x2="16" y2="12"></line>
+                  <line x1="8" y1="16" x2="16" y2="16"></line>
+                </svg>
+              </div>
+              <h2>Proceed to Monitoring Dashboard</h2>
               <p className="muted small">
-                View production forecasts and historical trends
-              </p>
-            </button>
-
-            <button
-              className="selection-card"
-              onClick={() => setActivePanel('summary')}
-            >
-              <h2>Summary</h2>
-              <p className="muted small">
-                View aggregated statistics and overview metrics
+                Monitor water quality parameters, weather conditions, and breeding cycle data
               </p>
             </button>
           </div>
-
-          <button
-            className="logout-button"
-            onClick={() => {
-              setUser(null)
-              setActivePanel(null)
-            }}
-          >
-            Sign out
-          </button>
         </div>
       </div>
     )
@@ -346,377 +1292,161 @@ function App() {
 
   return (
     <div className="screen dashboard-screen">
-      <aside className="sidebar">
-        <div>
-          <p className="eyebrow">BFAR / Bohol</p>
-          <h2>Tilapia Fry Ops Center</h2>
-          <p className="muted small">
-            Logged in as <strong>{user.email}</strong>
-          </p>
-        </div>
-
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
+        <button className="sidebar-toggle" onClick={() => setActivePanel(null)} title="Go to Homepage">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
         <nav className="menu">
           <button
             className={activePanel === 'database' ? 'menu-item active' : 'menu-item'}
             onClick={() => setActivePanel('database')}
           >
-            Database Access
+            Summary and Reports
           </button>
-
           <button
-            className={activePanel === 'forecast' ? 'menu-item active' : 'menu-item'}
-            onClick={() => setActivePanel('forecast')}
+            className={activePanel === 'monitoring' ? 'menu-item active' : 'menu-item'}
+            onClick={() => setActivePanel('monitoring')}
           >
-            Predictive Analysis
-          </button>
-
-          <button
-            className={activePanel === 'summary' ? 'menu-item active' : 'menu-item'}
-            onClick={() => setActivePanel('summary')}
-          >
-            Summary
-          </button>
-
-          <button
-            className="menu-item"
-            onClick={() => {
-              setActivePanel(null)
-            }}
-            style={{ marginTop: '1rem', borderColor: 'rgba(255,255,255,0.3)' }}
-          >
-            ← Back to Menu
+            Monitoring Dashboard
           </button>
         </nav>
-
-        <div className="sidebar-card">
-          <p>November Dispatch Window</p>
-          <h3>96,200 fry ready</h3>
-          <p className="muted small">
-            Coordinate with LGUs for grow-out distribution in core municipalities.
-          </p>
+        <div className="sidebar-footer">
+          <button className="logout-button" onClick={handleLogout}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+            Logout
+          </button>
         </div>
       </aside>
 
       <main className="main-area">
-        <header className="dashboard-header">
-          <div>
-            <p className="eyebrow">Realtime overview</p>
-            <h1>
-              Tilapia fry production
-              <span> • {new Date().toLocaleDateString('en-PH')}</span>
-            </h1>
-          </div>
-
-          <div className="header-stats">
-            <div>
-              <p className="muted small">Registered beneficiaries</p>
-              <strong>{formatNumber(summaryStats.totalBeneficiaries)}</strong>
-            </div>
-            <div>
-              <p className="muted small">Tilapia fry distributed</p>
-              <strong>{formatNumber(summaryStats.quantity)} pcs</strong>
-            </div>
-          </div>
-        </header>
-
         {activePanel === 'database' && (
           <section className="panel">
             <header className="panel-header">
-              <div>
-                <p className="eyebrow">BFAR Bohol beneficiaries</p>
-                <h2>{classificationCopy[classification]}</h2>
-              </div>
+              <h2>{showDatabaseTable ? 'Records' : 'Summary'}</h2>
               <div className="panel-actions">
-                <div className="toggle">
+                {showDatabaseTable && (
                   <button
-                    type="button"
-                    className={classification === 'individual' ? 'menu-item active' : 'menu-item'}
-                    onClick={() => setClassification('individual')}
+                    className="add-record-button"
+                    onClick={() => setShowAddModal(true)}
                   >
-                    Individuals
+                    + Add Record
                   </button>
-                  <button
-                    type="button"
-                    className={classification === 'group' ? 'menu-item active' : 'menu-item'}
-                    onClick={() => setClassification('group')}
+                )}
+                <button
+                  className={showDatabaseTable ? 'view-toggle-btn active' : 'view-toggle-btn'}
+                  onClick={() => setShowDatabaseTable(!showDatabaseTable)}
+                >
+                  {showDatabaseTable ? '📊 Show Summary' : '📋 View Beneficiary Records'}
+                </button>
+              </div>
+            </header>
+
+            {toast && <p className={`toast ${toast.includes('Error') ? 'error-toast' : 'success-toast'}`}>{toast}</p>}
+
+            {!showDatabaseTable ? (
+              <div className="database-summary">
+                <div className="filter-section" style={{ marginBottom: '2rem' }}>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="filter-select"
                   >
-                    Groups
-                  </button>
+                    <option value="">All Years</option>
+                    <option value="2019">2019</option>
+                    <option value="2020">2020</option>
+                    <option value="2021">2021</option>
+                    <option value="2022">2022</option>
+                    <option value="2023">2023</option>
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                  </select>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="filter-select"
+                  >
+                    <option value="">All Months</option>
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                  </select>
                 </div>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  className="filter-select"
-                >
-                  <option value="">All Years</option>
-                  <option value="2019">2019</option>
-                  <option value="2020">2020</option>
-                  <option value="2021">2021</option>
-                  <option value="2022">2022</option>
-                  <option value="2023">2023</option>
-                  <option value="2024">2024</option>
-                  <option value="2025">2025</option>
-                </select>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="filter-select"
-                >
-                  <option value="">All Months</option>
-                  <option value="1">January</option>
-                  <option value="2">February</option>
-                  <option value="3">March</option>
-                  <option value="4">April</option>
-                  <option value="5">May</option>
-                  <option value="6">June</option>
-                  <option value="7">July</option>
-                  <option value="8">August</option>
-                  <option value="9">September</option>
-                  <option value="10">October</option>
-                  <option value="11">November</option>
-                  <option value="12">December</option>
-                </select>
-                <input
-                  type="search"
-                  placeholder="Search name, barangay, or municipality"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                />
-              </div>
-            </header>
-
-            {toast && <p className="warning-banner">{toast}</p>}
-
-            <div className="table-wrapper">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Beneficiary</th>
-                    <th>Gender</th>
-                    <th>Barangay</th>
-                    <th>Municipality</th>
-                    <th>Species</th>
-                    <th>Quantity (pcs)</th>
-                    <th>Implementation</th>
-                    <th>Satisfaction</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingRecords ? (
-                    <tr>
-                      <td colSpan={9} className="muted small">
-                        Loading latest entries…
-                      </td>
-                    </tr>
-                  ) : filteredRecords.length ? (
-                    filteredRecords.map((record, index) => (
-                      <tr key={`${record.id ?? record.excel_id ?? index}`}>
-                        <td>{record.name}</td>
-                        <td>{record.gender}</td>
-                        <td>{record.barangay}</td>
-                        <td>{record.municipality}</td>
-                        <td>{formatSpecies(record.species)}</td>
-                        <td>{formatNumber(record.quantity)}</td>
-                        <td>{record.implementationType || record.implementation_type}</td>
-                        <td>{record.satisfaction}</td>
-                        <td>
-                          {formatDate(record.dateImplemented ?? record.date_implemented)}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={9} className="muted small">
-                        No records found for this filter.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {activePanel === 'forecast' && (
-          <section className="panel">
-            <header className="panel-header">
-              <div>
-                <p className="eyebrow">Predictive analytics</p>
-                <h2>Tilapia fry production outlook</h2>
-              </div>
-            </header>
-
-            <div className="stats-grid">
-              <article className="stat-card">
-                <p className="muted small">Machine learning forecast</p>
-                <h3>{loadingSummary ? 'Loading…' : 'Coming soon'}</h3>
-                <p className="muted small">
-                  Placeholder while the BFAR analytics team connects the model pipeline.
-                </p>
-              </article>
-              <article className="stat-card">
-                <p className="muted small">Historical coverage</p>
-                <h3>6 years</h3>
-                <p className="muted small">Monthly issuance records from Excel archive</p>
-              </article>
-              <article className="stat-card">
-                <p className="muted small">Required inputs</p>
-                <h3>Quantity + species mix</h3>
-                <p className="muted small">Per municipality, per production cycle</p>
-              </article>
-            </div>
-
-            <div className="chart-card">
-              <h3>Production Trend Chart</h3>
-              {timeline.length > 0 ? (
-                <div className="trend-chart-container">
-                  <svg className="trend-chart" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
-                    <defs>
-                      <linearGradient id="lineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#1A3D64" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#1A3D64" stopOpacity="0" />
-                      </linearGradient>
-                    </defs>
-                    <g transform="translate(60, 20)">
-                      {timeline.length > 1 && (() => {
-                        const points = timeline.map((entry, index) => {
-                          const x = (index / (timeline.length - 1)) * 700
-                          const y = 260 - (entry.fryCount / maxTimelineValue) * 240
-                          return { x, y, value: entry.fryCount, label: entry.month }
-                        })
-                        const pathData = points
-                          .map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`))
-                          .join(' ')
-
-                        return (
-                          <>
-                            <path
-                              d={`${pathData} L ${points[points.length - 1].x} 260 L ${points[0].x} 260 Z`}
-                              fill="url(#lineGradient)"
-                            />
-                            <path
-                              d={pathData}
-                              fill="none"
-                              stroke="#1A3D64"
-                              strokeWidth="3"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            {points.map((point, i) => (
-                              <g key={i}>
-                                <circle cx={point.x} cy={point.y} r="4" fill="#1A3D64" />
-                                {i % Math.ceil(timeline.length / 8) === 0 && (
-                                  <text
-                                    x={point.x}
-                                    y={280}
-                                    textAnchor="middle"
-                                    fontSize="10"
-                                    fill="#1A3D64"
-                                    transform={`rotate(-45 ${point.x} 280)`}
-                                  >
-                                    {point.label.split(' ')[0]}
-                                  </text>
-                                )}
-                              </g>
-                            ))}
-                          </>
-                        )
-                      })()}
-                      <line x1="0" y1="260" x2="700" y2="260" stroke="#1D546C" strokeWidth="1" strokeOpacity="0.3" />
-                      <line x1="0" y1="260" x2="0" y2="20" stroke="#1D546C" strokeWidth="1" strokeOpacity="0.3" />
-                    </g>
-                  </svg>
+                <div className="stats-grid">
+                  <article className="stat-card">
+                    <p className="muted small">Total Beneficiaries</p>
+                    <h3>{formatNumber(summaryStats.totalBeneficiaries)}</h3>
+                    <p className="muted small">Registered individuals and groups</p>
+                  </article>
+                  <article className="stat-card">
+                    <p className="muted small">Total Quantity Distributed</p>
+                    <h3>{formatNumber(summaryStats.quantity)} pcs</h3>
+                    <p className="muted small">Tilapia fry distributed</p>
+                  </article>
+                  <article className="stat-card">
+                    <p className="muted small">Total Cost</p>
+                    <h3>{formatCurrency(summaryStats.cost)}</h3>
+                    <p className="muted small">Total implementation cost</p>
+                  </article>
                 </div>
-              ) : (
-                <p className="muted small">No trend data available</p>
-              )}
-            </div>
 
-            <div className="timeline">
-              {timeline.map((entry) => (
-                <div className="timeline-row" key={entry.month}>
-                  <div>
-                    <p className="muted small">{entry.month}</p>
-                    <strong>{formatNumber(entry.fryCount)} fry issued</strong>
-                  </div>
-                  <div className="timeline-bar">
-                    <span style={{ width: `${(entry.fryCount / maxTimelineValue) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {activePanel === 'summary' && (
-          <section className="panel">
-            <header className="panel-header">
-              <div>
-                <p className="eyebrow">System overview</p>
-                <h2>Summary Statistics</h2>
-              </div>
-            </header>
-
-            <div className="stats-grid">
-              <article className="stat-card">
-                <p className="muted small">Total beneficiaries</p>
-                <h3>{formatNumber(summaryStats.totalBeneficiaries)}</h3>
-                <p className="muted small">Registered individuals and groups</p>
-              </article>
-              <article className="stat-card">
-                <p className="muted small">Tilapia fry distributed</p>
-                <h3>{formatNumber(summaryStats.quantity)} pcs</h3>
-                <p className="muted small">Total quantity issued</p>
-              </article>
-            </div>
-
-            {loadingBreakdown ? (
-              <div className="chart-card">
-                <p className="muted">Loading breakdown data...</p>
-              </div>
-            ) : breakdown ? (
-              <>
-                <div className="chart-card">
-                  <h3>Yearly Breakdown</h3>
-                  <div className="breakdown-table">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Year</th>
-                          <th>Beneficiaries</th>
-                          <th>Fry Distributed (pcs)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {breakdown.yearly.map((year) => (
-                          <tr key={year.year}>
-                            <td><strong>{year.year}</strong></td>
-                            <td>{formatNumber(year.beneficiaryCount)}</td>
-                            <td>{formatNumber(year.totalQuantity)}</td>
+                {breakdown && filteredYearlyBreakdown.length > 0 && (
+                  <div className="chart-card">
+                    <h3>Yearly Summary</h3>
+                    <div className="breakdown-table">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Year</th>
+                            <th>Beneficiaries</th>
+                            <th>Fry Distributed (pcs)</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {filteredYearlyBreakdown.map((year) => (
+                            <tr key={year.year}>
+                              <td><strong>{year.year}</strong></td>
+                              <td>{formatNumber(year.beneficiaryCount)}</td>
+                              <td>{formatNumber(year.totalQuantity)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="chart-card">
-                  <h3>Monthly Breakdown (Last 12 Months)</h3>
-                  <div className="breakdown-table">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Year</th>
-                          <th>Month</th>
-                          <th>Beneficiaries</th>
-                          <th>Fry Distributed (pcs)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {breakdown.monthly
-                          .slice(-12)
-                          .map((month, index) => (
+                  <h3>{selectedYear || selectedMonth ? 'Monthly Activity' : 'Recent Activity (Last 12 Months)'}</h3>
+                  {breakdown && filteredMonthlyBreakdown.length > 0 ? (
+                    <div className="breakdown-table">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Year</th>
+                            <th>Month</th>
+                            <th>Beneficiaries</th>
+                            <th>Fry Distributed (pcs)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedYear || selectedMonth ? filteredMonthlyBreakdown : filteredMonthlyBreakdown.slice(-12)).map((month, index) => (
                             <tr key={`${month.year}-${month.month}-${index}`}>
                               <td>{month.year}</td>
                               <td>
@@ -728,17 +1458,1659 @@ function App() {
                               <td>{formatNumber(month.totalQuantity)}</td>
                             </tr>
                           ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="muted small">No monthly data available</p>
+                  )}
                 </div>
-              </>
+              </div>
             ) : (
-              <div className="chart-card">
-                <p className="muted small">Breakdown data unavailable</p>
+              <div className="database-table-view">
+                <div className="filter-section">
+                  <div className="toggle">
+                    <button
+                      type="button"
+                      className={classification === 'individual' ? 'toggle-btn active' : 'toggle-btn'}
+                      onClick={() => setClassification('individual')}
+                    >
+                      Individuals
+                    </button>
+                    <button
+                      type="button"
+                      className={classification === 'group' ? 'toggle-btn active' : 'toggle-btn'}
+                      onClick={() => setClassification('group')}
+                    >
+                      Groups
+                    </button>
+                  </div>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="filter-select"
+                  >
+                    <option value="">All Years</option>
+                    <option value="2019">2019</option>
+                    <option value="2020">2020</option>
+                    <option value="2021">2021</option>
+                    <option value="2022">2022</option>
+                    <option value="2023">2023</option>
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                  </select>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="filter-select"
+                  >
+                    <option value="">All Months</option>
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                  </select>
+                  <input
+                    type="search"
+                    placeholder="Search name, barangay, or municipality"
+                    value={keyword}
+                    onChange={(event) => setKeyword(event.target.value)}
+                    className="search-input"
+                  />
+                </div>
+
+                <div className="table-wrapper">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Beneficiary</th>
+                        <th>Gender</th>
+                        <th>Barangay</th>
+                        <th>Municipality</th>
+                        <th>Species</th>
+                        <th>Quantity (pcs)</th>
+                        <th>Implementation</th>
+                        <th>Satisfaction</th>
+                        <th>Date</th>
+                        <th style={{ width: '80px', textAlign: 'center' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loadingRecords ? (
+                        <tr>
+                          <td colSpan={10} className="muted small">
+                            Loading latest entries…
+                          </td>
+                        </tr>
+                      ) : filteredRecords.length ? (
+                        filteredRecords.map((record, index) => (
+                          <tr key={`${record.id ?? record.excel_id ?? index}`}>
+                            <td>{record.name}</td>
+                            <td>{record.gender}</td>
+                            <td>{record.barangay}</td>
+                            <td>{record.municipality}</td>
+                            <td>{formatSpecies(record.species)}</td>
+                            <td>{formatNumber(record.quantity)}</td>
+                            <td>{record.implementationType || record.implementation_type}</td>
+                            <td>{record.satisfaction}</td>
+                            <td>
+                              {formatDate(record.dateImplemented ?? record.date_implemented)}
+                            </td>
+                            <td style={{ textAlign: 'center', position: 'relative' }}>
+                              {record.id && (
+                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                  <button
+                                    onClick={() => setOpenDropdownId(openDropdownId === record.id ? null : record.id)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: '#666',
+                                      cursor: 'pointer',
+                                      padding: '0.5rem',
+                                      borderRadius: '4px',
+                                      fontSize: '1rem',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'background-color 0.2s',
+                                      width: '32px',
+                                      height: '32px'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                                    title="Actions"
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <circle cx="12" cy="12" r="1"></circle>
+                                      <circle cx="12" cy="5" r="1"></circle>
+                                      <circle cx="12" cy="19" r="1"></circle>
+                                    </svg>
+                                  </button>
+                                  {openDropdownId === record.id && (
+                                    <div className="action-dropdown">
+                                      <button
+                                        className="dropdown-item"
+                                        onClick={() => handleEditRecord(record)}
+                                      >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                        </svg>
+                                        Edit
+                                      </button>
+                                      <button
+                                        className="dropdown-item delete-item"
+                                        onClick={() => handleDeleteRecord(record.id)}
+                                      >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <polyline points="3 6 5 6 21 6"></polyline>
+                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        </svg>
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={10} className="muted small">
+                            No records found for this filter.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </section>
+        )}
+
+        {activePanel === 'monitoring' && !showCycleSummary && !showCyclesList && (
+          <MonitoringDashboardContent
+            monitoringParameters={monitoringParameters}
+            loadingMonitoring={loadingMonitoring}
+            weatherData={weatherData}
+            loadingWeather={loadingWeather}
+            showMonitoringModal={showMonitoringModal}
+            setShowMonitoringModal={setShowMonitoringModal}
+            newMonitoringRecord={newMonitoringRecord}
+            setNewMonitoringRecord={setNewMonitoringRecord}
+            editingMonitoring={editingMonitoring}
+            handleAddMonitoringRecord={handleAddMonitoringRecord}
+            handleUpdateMonitoringRecord={handleUpdateMonitoringRecord}
+            handleDeleteMonitoringRecord={handleDeleteMonitoringRecord}
+            handleEditMonitoringRecord={handleEditMonitoringRecord}
+            setEditingMonitoring={setEditingMonitoring}
+            isSubmitting={isSubmitting}
+            currentCycleId={currentCycleId}
+            setCurrentCycleId={setCurrentCycleId}
+            formatDate={formatDate}
+            deviceReadings={deviceReadings}
+            loadingDeviceReadings={loadingDeviceReadings}
+            onViewCycleSummary={(cycleId) => {
+              if (cycleId === 'all') {
+                setShowCyclesList(true)
+              } else {
+                setSelectedCycleForSummary(cycleId)
+                setShowCycleSummary(true)
+              }
+            }}
+          />
+        )}
+
+        {activePanel === 'monitoring' && showCyclesList && (
+          <CyclesListContent
+            onBack={() => {
+              setShowCyclesList(false)
+            }}
+            onViewCycle={(cycleId) => {
+              if (cycleId) {
+                setSelectedCycleForSummary(cycleId)
+                setShowCyclesList(false)
+                setShowCycleSummary(true)
+              }
+            }}
+            refreshTrigger={cyclesListRefreshTrigger}
+          />
+        )}
+
+        {activePanel === 'monitoring' && showCycleSummary && !showCyclesList && (
+          <CycleSummaryContent
+            cycleId={selectedCycleForSummary}
+            onBack={() => {
+              setShowCycleSummary(false)
+              setSelectedCycleForSummary(null)
+            }}
+          />
+        )}
+
+        {activePanel === 'forecast' && false && (
+          <section className="panel">
+            <header className="panel-header">
+              <h2>Production Statistics</h2>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="forecast-view-buttons">
+                  <button
+                    className={forecastView === 'quarterly' ? 'forecast-btn active' : 'forecast-btn'}
+                    onClick={() => setForecastView('quarterly')}
+                  >
+                    Quarterly Statistics
+                  </button>
+                  <button
+                    className={forecastView === 'monthly' ? 'forecast-btn active' : 'forecast-btn'}
+                    onClick={() => setForecastView('monthly')}
+                  >
+                    Monthly Statistics
+                  </button>
+                  <button
+                    className={forecastView === 'annual' ? 'forecast-btn active' : 'forecast-btn'}
+                    onClick={() => setForecastView('annual')}
+                  >
+                    Annual Statistics
+                  </button>
+                </div>
+                {(forecastView === 'quarterly' || forecastView === 'monthly' || forecastView === 'annual') && (
+                  <div className="forecast-year-selector">
+                    <label htmlFor="forecast-year-select">Year:</label>
+                    <select
+                      id="forecast-year-select"
+                      value={forecastYear}
+                      onChange={(e) => setForecastYear(e.target.value)}
+                    >
+                      <option value="">All Years</option>
+                      {availableYears.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </header>
+
+            {forecastView === 'quarterly' && (
+              <>
+                <div className="chart-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <h3 style={{ margin: 0 }}>Quarterly Production Statistics</h3>
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '2.5rem', 
+                      padding: '1.25rem 2rem',
+                      backgroundColor: '#f8f9fa',
+                      borderRadius: '8px',
+                      fontSize: '1.25rem',
+                      fontWeight: '600'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#1A3D64', borderRadius: '2px' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Actual</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#4CAF50', borderRadius: '2px', borderTop: '3px dashed #4CAF50' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Predicted</span>
+                      </div>
+                    </div>
+                  </div>
+                  {quarterlyWithPredictions.length > 0 ? (
+                    <>
+                      {(() => {
+                        const actualData = quarterlyWithPredictions.filter((e) => e.actual !== null)
+                        const predictedData = quarterlyWithPredictions.filter((e) => e.predicted !== null)
+                        const totalActual = actualData.reduce((sum, e) => sum + (e.actual || 0), 0)
+                        const totalPredicted = predictedData.reduce((sum, e) => sum + (e.predicted || 0), 0)
+                        const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
+                        const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
+                        const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
+                        
+                        return (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                            gap: '1rem', 
+                            marginBottom: '1.5rem',
+                            padding: '0.875rem',
+                            backgroundColor: '#f8f9fa',
+                            borderRadius: '8px'
+                          }}>
+                            <div>
+                              <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Actual</p>
+                              <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#1A3D64' }}>
+                                {formatNumber(totalActual)}
+                              </p>
+                              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                {actualData.length} quarter{actualData.length !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            {predictedData.length > 0 && (
+                              <>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Predicted</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#4CAF50' }}>
+                                    {formatNumber(totalPredicted)}
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    {predictedData.length} quarter{predictedData.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Projected Growth</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: growthRate >= 0 ? '#4CAF50' : '#dc3545' }}>
+                                    {growthRate >= 0 ? '+' : ''}{growthRate}%
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    vs. average actual
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      <div style={{ marginBottom: '2rem' }}>
+                        {/* Combined Chart */}
+                        <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '8px' }}>
+                          <h4 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: '600', color: '#495057' }}>
+                            Production Overview
+                          </h4>
+                          <div className="trend-chart-container" style={{ height: '600px', overflow: 'visible' }}>
+                            <svg className="trend-chart" viewBox="0 0 2400 620" preserveAspectRatio="xMidYMid meet">
+                              <defs>
+                                <linearGradient id="quarterlyActualGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#1A3D64" stopOpacity="0.3" />
+                                  <stop offset="100%" stopColor="#1A3D64" stopOpacity="0" />
+                                </linearGradient>
+                                <linearGradient id="quarterlyPredictedGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#4CAF50" stopOpacity="0.2" />
+                                  <stop offset="100%" stopColor="#4CAF50" stopOpacity="0" />
+                                </linearGradient>
+                              </defs>
+                              <g transform="translate(60, 50)">
+                                {(() => {
+                                  // Create a combined sorted list of all quarters
+                                  const allQuarters = [...quarterlyWithPredictions].sort((a, b) => {
+                                    const aMatch = a.label.match(/Q(\d) (\d{4})/)
+                                    const bMatch = b.label.match(/Q(\d) (\d{4})/)
+                                    if (!aMatch || !bMatch) return 0
+                                    const aDate = new Date(parseInt(aMatch[2]), (parseInt(aMatch[1]) - 1) * 3)
+                                    const bDate = new Date(parseInt(bMatch[2]), (parseInt(bMatch[1]) - 1) * 3)
+                                    return aDate - bDate
+                                  })
+
+                                  // Create a map for x positions based on quarter index in chronological order
+                                  const quarterIndexMap = new Map()
+                                  allQuarters.forEach((entry, index) => {
+                                    quarterIndexMap.set(entry.label, index)
+                                  })
+
+                                  // Map points with consistent x positions based on chronological order
+                                  const actualPoints = allQuarters
+                                    .filter((entry) => entry.actual !== null)
+                                    .map((entry) => {
+                                      const index = quarterIndexMap.get(entry.label)
+                                      const x = (index / Math.max(allQuarters.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.actual || 0) / maxQuarterlyValue) * 420
+                                      return { x, y, value: entry.actual, label: entry.label }
+                                    })
+
+                                  const predictedPoints = allQuarters
+                                    .filter((entry) => entry.predicted !== null)
+                                    .map((entry) => {
+                                      const index = quarterIndexMap.get(entry.label)
+                                      const x = (index / Math.max(allQuarters.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.predicted || 0) / maxQuarterlyValue) * 420
+                                      return { x, y, value: entry.predicted, label: entry.label }
+                                    })
+
+                                  // Sort points by x position to ensure proper line connection
+                                  const sortedActualPoints = [...actualPoints].sort((a, b) => a.x - b.x)
+                                  const sortedPredictedPoints = [...predictedPoints].sort((a, b) => a.x - b.x)
+
+                                  const actualPathData = sortedActualPoints.length > 1
+                                    ? sortedActualPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  const predictedPathData = sortedPredictedPoints.length > 1
+                                    ? sortedPredictedPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  return (
+                                    <>
+                                      {/* Actual line */}
+                                      {actualPathData && (
+                                        <>
+                                          <path
+                                            d={`${actualPathData} L ${sortedActualPoints[sortedActualPoints.length - 1].x} 500 L ${sortedActualPoints[0].x} 500 Z`}
+                                            fill="url(#quarterlyActualGradient)"
+                                          />
+                                          <path
+                                            d={actualPathData}
+                                            fill="none"
+                                            stroke="#1A3D64"
+                                            strokeWidth="3"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Predicted line */}
+                                      {predictedPathData && (
+                                        <>
+                                          <path
+                                            d={`${predictedPathData} L ${sortedPredictedPoints[sortedPredictedPoints.length - 1].x} 500 L ${sortedPredictedPoints[0].x} 500 Z`}
+                                            fill="url(#quarterlyPredictedGradient)"
+                                          />
+                                          <path
+                                            d={predictedPathData}
+                                            fill="none"
+                                            stroke="#4CAF50"
+                                            strokeWidth="3"
+                                            strokeDasharray="5,5"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Actual data points */}
+                                      {actualPoints.map((point, i) => (
+                                        <g key={`actual-${i}`}>
+                                          <circle 
+                                            cx={point.x} 
+                                            cy={point.y} 
+                                            r="4" 
+                                            fill="#1A3D64" 
+                                          />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#1A3D64"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Predicted data points */}
+                                      {predictedPoints.map((point, i) => (
+                                        <g key={`predicted-${i}`}>
+                                          <circle 
+                                            cx={point.x} 
+                                            cy={point.y} 
+                                            r="4" 
+                                            fill="#4CAF50" 
+                                          />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#4CAF50"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Quarter labels */}
+                                      {allQuarters.map((entry, i) => {
+                                        const x = (i / Math.max(allQuarters.length - 1, 1)) * 2280
+                                        return (
+                                          <text
+                                            key={`label-${i}`}
+                                            x={x}
+                                            y={550}
+                                            textAnchor="middle"
+                                            fontSize="14"
+                                            fill="#495057"
+                                            fontWeight="500"
+                                          >
+                                            {entry.label.match(/Q(\d) (\d{4})/)?.[0] || entry.label}
+                                          </text>
+                                        )
+                                      })}
+                                    </>
+                                  )
+                                })()}
+                                <line x1="0" y1="500" x2="2280" y2="500" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                                <line x1="0" y1="500" x2="0" y2="5" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                              </g>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '2.5rem' }}>
+                        <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
+                          Detailed Breakdown
+                        </h4>
+                        <div style={{ 
+                          borderTop: '2px solid #e9ecef',
+                          paddingTop: '0.75rem',
+                          maxHeight: '400px',
+                          overflowY: 'auto'
+                        }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #dee2e6' }}>
+                                <th style={{ textAlign: 'left', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Period</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Actual</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Predicted</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {quarterlyWithPredictions.map((quarter, index) => {
+                                const hasBoth = quarter.actual !== null && quarter.predicted !== null
+                                // Create a unique key that includes both actual and predicted to prevent duplicates
+                                const uniqueKey = `${quarter.label}-${quarter.actual || 'null'}-${quarter.predicted || 'null'}`
+                                return (
+                                  <tr 
+                                    key={uniqueKey}
+                                    style={{ 
+                                      borderBottom: '1px solid #e9ecef',
+                                      backgroundColor: 'transparent'
+                                    }}
+                                  >
+                                    <td style={{ padding: '0.625rem 0.5rem', fontSize: '1.15rem', fontWeight: '600', color: '#495057' }}>
+                                      {quarter.label}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: quarter.actual !== null ? '#1A3D64' : '#adb5bd', fontWeight: '600' }}>
+                                      {quarter.actual !== null ? formatNumber(quarter.actual) : '—'}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: quarter.predicted !== null ? '#4CAF50' : '#adb5bd', fontWeight: '600' }}>
+                                      {quarter.predicted !== null ? formatNumber(quarter.predicted) : '—'}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted small">No quarterly data available</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {forecastView === 'monthly' && (
+              <>
+                <div className="chart-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <h3 style={{ margin: 0 }}>Monthly Production Statistics</h3>
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '2.5rem', 
+                      padding: '1.25rem 2rem',
+                      backgroundColor: '#f8f9fa',
+                      borderRadius: '8px',
+                      fontSize: '1.25rem',
+                      fontWeight: '600'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#1A3D64', borderRadius: '2px' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Actual</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#4CAF50', borderRadius: '2px', borderTop: '3px dashed #4CAF50' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Predicted</span>
+                      </div>
+                    </div>
+                  </div>
+                  {monthlyWithPredictions.length > 0 ? (
+                    <>
+                      {(() => {
+                        const actualData = monthlyWithPredictions.filter((e) => e.actual !== null)
+                        const predictedData = monthlyWithPredictions.filter((e) => e.predicted !== null)
+                        const totalActual = actualData.reduce((sum, e) => sum + (e.actual || 0), 0)
+                        const totalPredicted = predictedData.reduce((sum, e) => sum + (e.predicted || 0), 0)
+                        const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
+                        const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
+                        const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
+                        
+                        return (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                            gap: '1rem', 
+                            marginBottom: '1.5rem',
+                            padding: '0.875rem',
+                            backgroundColor: '#f8f9fa',
+                            borderRadius: '8px'
+                          }}>
+                            <div>
+                              <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Actual</p>
+                              <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#1A3D64' }}>
+                                {formatNumber(totalActual)}
+                              </p>
+                              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                {actualData.length} month{actualData.length !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            {predictedData.length > 0 && (
+                              <>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Predicted</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#4CAF50' }}>
+                                    {formatNumber(totalPredicted)}
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    {predictedData.length} month{predictedData.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Projected Growth</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: growthRate >= 0 ? '#4CAF50' : '#dc3545' }}>
+                                    {growthRate >= 0 ? '+' : ''}{growthRate}%
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    vs. average actual
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      <div style={{ marginBottom: '2rem' }}>
+                        {/* Combined Chart */}
+                        <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '8px' }}>
+                          <h4 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: '600', color: '#495057' }}>
+                            Production Overview
+                          </h4>
+                          <div className="trend-chart-container" style={{ height: '600px', overflow: 'visible' }}>
+                            <svg className="trend-chart" viewBox="0 0 2400 620" preserveAspectRatio="xMidYMid meet">
+                              <defs>
+                                <linearGradient id="monthlyActualGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#1A3D64" stopOpacity="0.3" />
+                                  <stop offset="100%" stopColor="#1A3D64" stopOpacity="0" />
+                                </linearGradient>
+                                <linearGradient id="monthlyPredictedGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#4CAF50" stopOpacity="0.2" />
+                                  <stop offset="100%" stopColor="#4CAF50" stopOpacity="0" />
+                                </linearGradient>
+                              </defs>
+                              <g transform="translate(60, 50)">
+                                {(() => {
+                                  // Sort all months chronologically
+                                  const allMonths = [...monthlyWithPredictions].sort((a, b) => {
+                                    const dateA = a.date || new Date(`01 ${a.month}`)
+                                    const dateB = b.date || new Date(`01 ${b.month}`)
+                                    return dateA - dateB
+                                  })
+
+                                  // Create a map for x positions based on month index
+                                  const monthIndexMap = new Map()
+                                  allMonths.forEach((entry, index) => {
+                                    monthIndexMap.set(entry.month, index)
+                                  })
+
+                                  // Map points with consistent x positions based on chronological order
+                                  const actualPoints = allMonths
+                                    .filter((entry) => entry.actual !== null)
+                                    .map((entry) => {
+                                      const index = monthIndexMap.get(entry.month)
+                                      const x = (index / Math.max(allMonths.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.actual || 0) / maxMonthlyValue) * 420
+                                      return { x, y, value: entry.actual, label: entry.month }
+                                    })
+
+                                  const predictedPoints = allMonths
+                                    .filter((entry) => entry.predicted !== null)
+                                    .map((entry) => {
+                                      const index = monthIndexMap.get(entry.month)
+                                      const x = (index / Math.max(allMonths.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.predicted || 0) / maxMonthlyValue) * 420
+                                      return { x, y, value: entry.predicted, label: entry.month }
+                                    })
+
+                                  // Sort points by x position to ensure proper line connection
+                                  const sortedActualPoints = [...actualPoints].sort((a, b) => a.x - b.x)
+                                  const sortedPredictedPoints = [...predictedPoints].sort((a, b) => a.x - b.x)
+
+                                  const actualPathData = sortedActualPoints.length > 1
+                                    ? sortedActualPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  const predictedPathData = sortedPredictedPoints.length > 1
+                                    ? sortedPredictedPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  return (
+                                    <>
+                                      {/* Actual line */}
+                                      {actualPathData && (
+                                        <>
+                                          <path
+                                            d={`${actualPathData} L ${sortedActualPoints[sortedActualPoints.length - 1].x} 500 L ${sortedActualPoints[0].x} 500 Z`}
+                                            fill="url(#monthlyActualGradient)"
+                                          />
+                                          <path
+                                            d={actualPathData}
+                                            fill="none"
+                                            stroke="#1A3D64"
+                                            strokeWidth="3"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Predicted line */}
+                                      {predictedPathData && (
+                                        <>
+                                          <path
+                                            d={`${predictedPathData} L ${sortedPredictedPoints[sortedPredictedPoints.length - 1].x} 500 L ${sortedPredictedPoints[0].x} 500 Z`}
+                                            fill="url(#monthlyPredictedGradient)"
+                                          />
+                                          <path
+                                            d={predictedPathData}
+                                            fill="none"
+                                            stroke="#4CAF50"
+                                            strokeWidth="3"
+                                            strokeDasharray="5,5"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Actual data points */}
+                                      {actualPoints.map((point, i) => (
+                                        <g key={`actual-${i}`}>
+                                          <circle cx={point.x} cy={point.y} r="4" fill="#1A3D64" />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#1A3D64"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Predicted data points */}
+                                      {predictedPoints.map((point, i) => (
+                                        <g key={`predicted-${i}`}>
+                                          <circle cx={point.x} cy={point.y} r="4" fill="#4CAF50" />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#4CAF50"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Month labels */}
+                                      {allMonths.map((entry, i) => {
+                                        const x = (i / Math.max(allMonths.length - 1, 1)) * 2280
+                                        const monthLabel = entry.month.split(' ')[0]
+                                        return (
+                                          <text
+                                            key={`label-${i}`}
+                                            x={x}
+                                            y={550}
+                                            textAnchor="middle"
+                                            fontSize="12"
+                                            fill="#495057"
+                                            fontWeight="500"
+                                            transform={`rotate(-45 ${x} 550)`}
+                                          >
+                                            {monthLabel}
+                                          </text>
+                                        )
+                                      })}
+                                    </>
+                                  )
+                                })()}
+                                <line x1="0" y1="500" x2="2280" y2="500" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                                <line x1="0" y1="500" x2="0" y2="5" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                              </g>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '2.5rem' }}>
+                        <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
+                          Detailed Breakdown
+                        </h4>
+                        <div style={{ 
+                          borderTop: '2px solid #e9ecef',
+                          paddingTop: '0.75rem',
+                          maxHeight: '400px',
+                          overflowY: 'auto'
+                        }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #dee2e6' }}>
+                                <th style={{ textAlign: 'left', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Month</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Actual</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Predicted</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthlyWithPredictions.map((entry, index) => {
+                                const hasBoth = entry.actual !== null && entry.predicted !== null
+                                const uniqueKey = `${entry.month}-${entry.actual || 'null'}-${entry.predicted || 'null'}`
+                                return (
+                                  <tr 
+                                    key={uniqueKey}
+                                    style={{ 
+                                      borderBottom: '1px solid #e9ecef',
+                                      backgroundColor: 'transparent'
+                                    }}
+                                  >
+                                    <td style={{ padding: '0.625rem 0.5rem', fontSize: '1.15rem', fontWeight: '600', color: '#495057' }}>
+                                      {entry.month}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: entry.actual !== null ? '#1A3D64' : '#adb5bd', fontWeight: '600' }}>
+                                      {entry.actual !== null ? formatNumber(entry.actual) : '—'}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: entry.predicted !== null ? '#4CAF50' : '#adb5bd', fontWeight: '600' }}>
+                                      {entry.predicted !== null ? formatNumber(entry.predicted) : '—'}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted small">No monthly data available</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {forecastView === 'annual' && (
+              <>
+                <div className="chart-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <h3 style={{ margin: 0 }}>Annual Production Statistics</h3>
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '2.5rem', 
+                      padding: '1.25rem 2rem',
+                      backgroundColor: '#f8f9fa',
+                      borderRadius: '8px',
+                      fontSize: '1.25rem',
+                      fontWeight: '600'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#1A3D64', borderRadius: '2px' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Actual</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '32px', height: '4px', backgroundColor: '#4CAF50', borderRadius: '2px', borderTop: '3px dashed #4CAF50' }}></div>
+                        <span style={{ color: '#495057', fontSize: '1.25rem', fontWeight: '600' }}>Predicted</span>
+                      </div>
+                    </div>
+                  </div>
+                  {annualWithPredictions.length > 0 ? (
+                    <>
+                      {(() => {
+                        const actualData = annualWithPredictions.filter((e) => e.actual !== null)
+                        const predictedData = annualWithPredictions.filter((e) => e.predicted !== null)
+                        const totalActual = actualData.reduce((sum, e) => sum + (e.actual || 0), 0)
+                        const totalPredicted = predictedData.reduce((sum, e) => sum + (e.predicted || 0), 0)
+                        const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
+                        const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
+                        const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
+                        
+                        return (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                            gap: '1rem', 
+                            marginBottom: '1.5rem',
+                            padding: '0.875rem',
+                            backgroundColor: '#f8f9fa',
+                            borderRadius: '8px'
+                          }}>
+                            <div>
+                              <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Actual</p>
+                              <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#1A3D64' }}>
+                                {formatNumber(totalActual)}
+                              </p>
+                              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                {actualData.length} year{actualData.length !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            {predictedData.length > 0 && (
+                              <>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Total Predicted</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: '#4CAF50' }}>
+                                    {formatNumber(totalPredicted)}
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    {predictedData.length} year{predictedData.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', color: '#6c757d', fontWeight: '600' }}>Projected Growth</p>
+                                  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: '600', color: growthRate >= 0 ? '#4CAF50' : '#dc3545' }}>
+                                    {growthRate >= 0 ? '+' : ''}{growthRate}%
+                                  </p>
+                                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.15rem', color: '#6c757d' }}>
+                                    vs. average actual
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      <div style={{ marginBottom: '2rem' }}>
+                        {/* Combined Chart */}
+                        <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '8px' }}>
+                          <h4 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: '600', color: '#495057' }}>
+                            Production Overview
+                          </h4>
+                          <div className="trend-chart-container" style={{ height: '600px', overflow: 'visible' }}>
+                            <svg className="trend-chart" viewBox="0 0 2400 620" preserveAspectRatio="xMidYMid meet">
+                              <defs>
+                                <linearGradient id="annualActualGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#1A3D64" stopOpacity="0.3" />
+                                  <stop offset="100%" stopColor="#1A3D64" stopOpacity="0" />
+                                </linearGradient>
+                                <linearGradient id="annualPredictedGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#4CAF50" stopOpacity="0.2" />
+                                  <stop offset="100%" stopColor="#4CAF50" stopOpacity="0" />
+                                </linearGradient>
+                              </defs>
+                              <g transform="translate(60, 50)">
+                                {(() => {
+                                  // Sort all years chronologically
+                                  const allYears = [...annualWithPredictions].sort((a, b) => {
+                                    return parseInt(a.label) - parseInt(b.label)
+                                  })
+
+                                  // Create a map for x positions based on year index
+                                  const yearIndexMap = new Map()
+                                  allYears.forEach((entry, index) => {
+                                    yearIndexMap.set(entry.label, index)
+                                  })
+
+                                  // Map points with consistent x positions based on chronological order
+                                  const actualPoints = allYears
+                                    .filter((entry) => entry.actual !== null)
+                                    .map((entry) => {
+                                      const index = yearIndexMap.get(entry.label)
+                                      const x = (index / Math.max(allYears.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.actual || 0) / maxAnnualValue) * 420
+                                      return { x, y, value: entry.actual, label: entry.label }
+                                    })
+
+                                  const predictedPoints = allYears
+                                    .filter((entry) => entry.predicted !== null)
+                                    .map((entry) => {
+                                      const index = yearIndexMap.get(entry.label)
+                                      const x = (index / Math.max(allYears.length - 1, 1)) * 2280
+                                      const y = 500 - ((entry.predicted || 0) / maxAnnualValue) * 420
+                                      return { x, y, value: entry.predicted, label: entry.label }
+                                    })
+
+                                  // Sort points by x position to ensure proper line connection
+                                  const sortedActualPoints = [...actualPoints].sort((a, b) => a.x - b.x)
+                                  const sortedPredictedPoints = [...predictedPoints].sort((a, b) => a.x - b.x)
+
+                                  const actualPathData = sortedActualPoints.length > 1
+                                    ? sortedActualPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  const predictedPathData = sortedPredictedPoints.length > 1
+                                    ? sortedPredictedPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ')
+                                    : ''
+
+                                  return (
+                                    <>
+                                      {/* Actual line */}
+                                      {actualPathData && (
+                                        <>
+                                          <path
+                                            d={`${actualPathData} L ${sortedActualPoints[sortedActualPoints.length - 1].x} 500 L ${sortedActualPoints[0].x} 500 Z`}
+                                            fill="url(#annualActualGradient)"
+                                          />
+                                          <path
+                                            d={actualPathData}
+                                            fill="none"
+                                            stroke="#1A3D64"
+                                            strokeWidth="3"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Predicted line */}
+                                      {predictedPathData && (
+                                        <>
+                                          <path
+                                            d={`${predictedPathData} L ${sortedPredictedPoints[sortedPredictedPoints.length - 1].x} 500 L ${sortedPredictedPoints[0].x} 500 Z`}
+                                            fill="url(#annualPredictedGradient)"
+                                          />
+                                          <path
+                                            d={predictedPathData}
+                                            fill="none"
+                                            stroke="#4CAF50"
+                                            strokeWidth="3"
+                                            strokeDasharray="5,5"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </>
+                                      )}
+                                      {/* Actual data points */}
+                                      {actualPoints.map((point, i) => (
+                                        <g key={`actual-${i}`}>
+                                          <circle 
+                                            cx={point.x} 
+                                            cy={point.y} 
+                                            r="4" 
+                                            fill="#1A3D64" 
+                                          />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#1A3D64"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Predicted data points */}
+                                      {predictedPoints.map((point, i) => (
+                                        <g key={`predicted-${i}`}>
+                                          <circle 
+                                            cx={point.x} 
+                                            cy={point.y} 
+                                            r="4" 
+                                            fill="#4CAF50" 
+                                          />
+                                          <text
+                                            x={point.x}
+                                            y={point.y - 15}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fill="#4CAF50"
+                                            fontWeight="600"
+                                          >
+                                            {formatNumber(point.value)}
+                                          </text>
+                                        </g>
+                                      ))}
+                                      {/* Year labels */}
+                                      {allYears.map((entry, i) => {
+                                        const x = (i / Math.max(allYears.length - 1, 1)) * 2280
+                                        return (
+                                          <text
+                                            key={`label-${i}`}
+                                            x={x}
+                                            y={550}
+                                            textAnchor="middle"
+                                            fontSize="14"
+                                            fill="#495057"
+                                            fontWeight="500"
+                                          >
+                                            {entry.label}
+                                          </text>
+                                        )
+                                      })}
+                                    </>
+                                  )
+                                })()}
+                                <line x1="0" y1="500" x2="2280" y2="500" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                                <line x1="0" y1="500" x2="0" y2="5" stroke="#1D546C" strokeWidth="2.5" strokeOpacity="0.3" />
+                              </g>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '2.5rem' }}>
+                        <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
+                          Detailed Breakdown
+                        </h4>
+                        <div style={{ 
+                          borderTop: '2px solid #e9ecef',
+                          paddingTop: '0.75rem',
+                          maxHeight: '400px',
+                          overflowY: 'auto'
+                        }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #dee2e6' }}>
+                                <th style={{ textAlign: 'left', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Year</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Actual</th>
+                                <th style={{ textAlign: 'right', padding: '0.5rem', fontSize: '1.1rem', fontWeight: '600', color: '#495057' }}>Predicted</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {annualWithPredictions.map((year, index) => {
+                                const hasBoth = year.actual !== null && year.predicted !== null
+                                const uniqueKey = `${year.label}-${year.actual || 'null'}-${year.predicted || 'null'}`
+                                return (
+                                  <tr 
+                                    key={uniqueKey}
+                                    style={{ 
+                                      borderBottom: '1px solid #e9ecef',
+                                      backgroundColor: 'transparent'
+                                    }}
+                                  >
+                                    <td style={{ padding: '0.625rem 0.5rem', fontSize: '1.15rem', fontWeight: '600', color: '#495057' }}>
+                                      {year.label}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: year.actual !== null ? '#1A3D64' : '#adb5bd', fontWeight: '600' }}>
+                                      {year.actual !== null ? formatNumber(year.actual) : '—'}
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '0.625rem 0.5rem', fontSize: '1.15rem', color: year.predicted !== null ? '#4CAF50' : '#adb5bd', fontWeight: '600' }}>
+                                      {year.predicted !== null ? formatNumber(year.predicted) : '—'}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="muted small">No annual data available</p>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+
+        {showAddModal && (
+          <div className="modal-overlay" onClick={() => !isSubmitting && setShowAddModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Add New Record</h2>
+                <button
+                  className="modal-close"
+                  onClick={() => !isSubmitting && setShowAddModal(false)}
+                  disabled={isSubmitting}
+                >
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleAddRecord} className="add-record-form">
+                <div className="form-row">
+                  <label className="field" style={{ position: 'relative' }}>
+                    <span>Name / Beneficiary *</span>
+                    <input
+                      type="text"
+                      value={selectedBeneficiary ? selectedBeneficiary.name : newRecord.name}
+                      onChange={(e) => handleNameChange(e.target.value)}
+                      onFocus={() => {
+                        setNameInputFocused(true)
+                        if (nameSuggestions.length > 0) {
+                          setShowNameSuggestions(true)
+                        }
+                      }}
+                      onBlur={() => {
+                        setNameInputFocused(false)
+                        // Delay hiding suggestions to allow clicking on them
+                        setTimeout(() => setShowNameSuggestions(false), 200)
+                      }}
+                      required
+                      disabled={isSubmitting}
+                      placeholder="Search existing beneficiary..."
+                    />
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.35rem' }}>
+                      Select an existing beneficiary. If not found, add them below, then continue with the distribution details.
+                    </div>
+                    {showNameSuggestions && nameSuggestions.length > 0 && (
+                      <div 
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          background: 'white',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                          zIndex: 1000,
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          marginTop: '4px'
+                        }}
+                      >
+                        <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#64748b', borderBottom: '1px solid #e5e7eb', background: '#f8f9fa' }}>
+                          Similar names found (click to use):
+                        </div>
+                        {nameSuggestions.map((suggestion, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => selectSuggestedName(suggestion)}
+                            style={{
+                              padding: '0.75rem',
+                              cursor: 'pointer',
+                              borderBottom: idx < nameSuggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
+                              transition: 'background 0.2s'
+                            }}
+                            onMouseEnter={(e) => e.target.style.background = '#f8f9fa'}
+                            onMouseLeave={(e) => e.target.style.background = 'white'}
+                          >
+                            <div style={{ fontWeight: '600', color: '#1a202c' }}>{suggestion.name}</div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                              {Math.round(suggestion.similarity * 100)}% match
+                              {suggestion.beneficiary && (
+                                <span style={{ marginLeft: '0.5rem', color: '#059669', fontWeight: '500' }}>
+                                  • Will auto-fill info
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </label>
+                  <label className="field">
+                    <span>Gender</span>
+                    <select
+                      value={selectedBeneficiary?.gender ?? newRecord.gender}
+                      onChange={(e) => setNewRecord({ ...newRecord, gender: e.target.value })}
+                      disabled={isSubmitting || !!selectedBeneficiary}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </label>
+                </div>
+
+                {selectedBeneficiary && (
+                  <div
+                    style={{
+                      margin: '0.5rem 0 1rem',
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      background: '#f8fafc',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: '1rem',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#111827' }}>{selectedBeneficiary.name}</div>
+                      <div style={{ fontSize: '0.9rem', color: '#374151' }}>
+                        {selectedBeneficiary.gender || '—'} · {selectedBeneficiary.barangay || '—'} · {selectedBeneficiary.municipality || '—'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearSelectedBeneficiary}
+                      disabled={isSubmitting}
+                      className="cancel-button"
+                      style={{ padding: '0.5rem 0.75rem' }}
+                    >
+                      Change beneficiary
+                    </button>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    marginBottom: '1rem',
+                    border: '1px dashed #cbd5e1',
+                    borderRadius: '10px',
+                    padding: '0.75rem',
+                    background: '#f8fafc'
+                  }}
+                >
+                  <div style={{ fontWeight: 600, color: '#1f2937', marginBottom: '0.5rem' }}>
+                    Add beneficiary (if not found)
+                  </div>
+                  <div className="form-row">
+                    <label className="field">
+                      <span>Name *</span>
+                      <input
+                        type="text"
+                        value={newBeneficiary.name}
+                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, name: e.target.value })}
+                        disabled={isCreatingBeneficiary}
+                        placeholder="Full name"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Gender</span>
+                      <select
+                        value={newBeneficiary.gender}
+                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, gender: e.target.value })}
+                        disabled={isCreatingBeneficiary}
+                      >
+                        <option value="">Select...</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-row">
+                    <label className="field">
+                      <span>Barangay</span>
+                      <input
+                        type="text"
+                        value={newBeneficiary.barangay}
+                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, barangay: e.target.value })}
+                        disabled={isCreatingBeneficiary}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Municipality</span>
+                      <input
+                        type="text"
+                        value={newBeneficiary.municipality}
+                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, municipality: e.target.value })}
+                        disabled={isCreatingBeneficiary}
+                      />
+                    </label>
+                  </div>
+                  <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="submit-button"
+                      onClick={handleCreateBeneficiary}
+                      disabled={isCreatingBeneficiary}
+                      style={{ padding: '0.5rem 1rem' }}
+                    >
+                      {isCreatingBeneficiary ? 'Saving...' : 'Save Beneficiary'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <label className="field">
+                    <span>Barangay</span>
+                    <input
+                      type="text"
+                      value={selectedBeneficiary?.barangay ?? newRecord.barangay}
+                      onChange={(e) => setNewRecord({ ...newRecord, barangay: e.target.value })}
+                      disabled={isSubmitting || !!selectedBeneficiary}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Municipality</span>
+                    <input
+                      type="text"
+                      value={selectedBeneficiary?.municipality ?? newRecord.municipality}
+                      onChange={(e) => setNewRecord({ ...newRecord, municipality: e.target.value })}
+                      disabled={isSubmitting || !!selectedBeneficiary}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Species</span>
+                    <input
+                      type="text"
+                      value={newRecord.species}
+                      onChange={(e) => setNewRecord({ ...newRecord, species: e.target.value })}
+                      placeholder="e.g., Tilapia"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Quantity (pcs)</span>
+                    <input
+                      type="number"
+                      value={newRecord.quantity}
+                      onChange={(e) => setNewRecord({ ...newRecord, quantity: e.target.value })}
+                      min="0"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Cost (PHP)</span>
+                    <input
+                      type="number"
+                      value={newRecord.cost}
+                      onChange={(e) => setNewRecord({ ...newRecord, cost: e.target.value })}
+                      min="0"
+                      step="0.01"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Implementation Type</span>
+                    <input
+                      type="text"
+                      value={newRecord.implementationType}
+                      onChange={(e) => setNewRecord({ ...newRecord, implementationType: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Satisfaction</span>
+                    <select
+                      value={newRecord.satisfaction}
+                      onChange={(e) => setNewRecord({ ...newRecord, satisfaction: e.target.value })}
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Satisfied">Satisfied</option>
+                      <option value="Very Satisfied">Very Satisfied</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="Dissatisfied">Dissatisfied</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Date Implemented</span>
+                    <input
+                      type="date"
+                      value={newRecord.dateImplemented}
+                      onChange={(e) => setNewRecord({ ...newRecord, dateImplemented: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="cancel-button"
+                    onClick={() => setShowAddModal(false)}
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="submit-button"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Adding...' : 'Add Record'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {showEditModal && editingRecord && (
+          <div className="modal-overlay" onClick={() => !isSubmitting && setShowEditModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Edit Record</h2>
+                <button
+                  className="modal-close"
+                  onClick={() => !isSubmitting && setShowEditModal(false)}
+                  disabled={isSubmitting}
+                >
+                  ×
+                </button>
+              </div>
+              <form onSubmit={handleUpdateRecord} className="add-record-form">
+                <div className="form-row">
+                  <label className="field">
+                    <span>Name *</span>
+                    <input
+                      type="text"
+                      value={newRecord.name}
+                      onChange={(e) => setNewRecord({ ...newRecord, name: e.target.value })}
+                      required
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Gender</span>
+                    <select
+                      value={newRecord.gender}
+                      onChange={(e) => setNewRecord({ ...newRecord, gender: e.target.value })}
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Barangay</span>
+                    <input
+                      type="text"
+                      value={newRecord.barangay}
+                      onChange={(e) => setNewRecord({ ...newRecord, barangay: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Municipality</span>
+                    <input
+                      type="text"
+                      value={newRecord.municipality}
+                      onChange={(e) => setNewRecord({ ...newRecord, municipality: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Species</span>
+                    <input
+                      type="text"
+                      value={newRecord.species}
+                      onChange={(e) => setNewRecord({ ...newRecord, species: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Quantity (pcs) *</span>
+                    <input
+                      type="number"
+                      value={newRecord.quantity}
+                      onChange={(e) => setNewRecord({ ...newRecord, quantity: e.target.value })}
+                      required
+                      min="0"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Cost (₱)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newRecord.cost}
+                      onChange={(e) => setNewRecord({ ...newRecord, cost: e.target.value })}
+                      min="0"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Implementation Type</span>
+                    <select
+                      value={newRecord.implementationType}
+                      onChange={(e) => setNewRecord({ ...newRecord, implementationType: e.target.value })}
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Direct Distribution">Direct Distribution</option>
+                      <option value="Community-Based">Community-Based</option>
+                      <option value="Institutional">Institutional</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
+                    <span>Satisfaction</span>
+                    <select
+                      value={newRecord.satisfaction}
+                      onChange={(e) => setNewRecord({ ...newRecord, satisfaction: e.target.value })}
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Satisfied">Satisfied</option>
+                      <option value="Very Satisfied">Very Satisfied</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="Dissatisfied">Dissatisfied</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Date Implemented</span>
+                    <input
+                      type="date"
+                      value={newRecord.dateImplemented}
+                      onChange={(e) => setNewRecord({ ...newRecord, dateImplemented: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="cancel-button"
+                    onClick={() => setShowEditModal(false)}
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="submit-button"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Updating...' : 'Update Record'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
       </main>
     </div>

@@ -40,13 +40,22 @@ const MONTH_SET = new Set(MONTH_KEYWORDS)
 const parseArgs = () => {
   const args = process.argv.slice(2)
   const fileArg = args.find((arg) => arg.startsWith('--file='))
+  const yearArg = args.find((arg) => arg.startsWith('--year='))
 
   if (!fileArg) {
-    console.error('Usage: npm run import -- --file=path/to/beneficiaries.xlsx')
+    console.error('Usage: npm run import -- --file=path/to/beneficiaries.xlsx [--year=2019]')
+    console.error('  --file: Path to Excel file (required)')
+    console.error('  --year: Year filter and fallback (optional)')
+    console.error('         - If sheet has year (e.g., "January 2022"), only imports matching sheets')
+    console.error('         - If sheet has no year (e.g., "January"), uses this year for dates')
+    console.error('         - Defaults to current year if not specified')
     process.exit(1)
   }
 
-  return path.resolve(__dirname, '..', fileArg.split('=')[1])
+  const filePath = path.resolve(__dirname, '..', fileArg.split('=')[1])
+  const year = yearArg ? yearArg.split('=')[1] : null
+
+  return { filePath, year }
 }
 
 const isMonthlySheet = (name = '') => {
@@ -57,6 +66,17 @@ const isMonthlySheet = (name = '') => {
   return MONTH_KEYWORDS.some((keyword) =>
     normalized.replace(/\s+/g, ' ').split(' ').includes(keyword)
   )
+}
+
+const matchesYear = (sheetName, targetYear) => {
+  if (!targetYear) return true // No filter if year not specified
+  const yearMatch = sheetName.match(/\d{4}/)
+  if (yearMatch) {
+    // Sheet has a year - only include if it matches
+    return yearMatch[0] === String(targetYear)
+  }
+  // Sheet doesn't have a year - include it (will use defaultYear)
+  return true
 }
 
 const toNumber = (value) => {
@@ -90,30 +110,45 @@ const normalizeRow = (row, sheetName) => {
   }
 }
 
+let defaultYear = null
+
 const buildDate = (dayValue, sheetName) => {
   if (!dayValue) return null
   const month = `${sheetName}`.split(' ')[0]
   if (!month) return null
-  const date = new Date(`${month} ${dayValue}, ${sheetName.match(/\\d{4}/)?.[0] ?? '2019'}`)
+  // Extract year from sheet name (e.g., "January 2020" -> "2020")
+  const yearMatch = sheetName.match(/\d{4}/)
+  const year = yearMatch ? yearMatch[0] : (defaultYear || new Date().getFullYear())
+  const date = new Date(`${month} ${dayValue}, ${year}`)
   return Number.isNaN(date.getTime()) ? null : date
 }
 
 const insertRows = async (rows) => {
   const sql = `
-    INSERT INTO beneficiaries (
-      excel_id, classification, name, gender, barangay, municipality, contact,
-      species, quantity, cost, implementation_type, satisfaction, date_implemented
+    WITH upsert_beneficiary AS (
+      INSERT INTO beneficiaries (
+        excel_id, classification, name, gender, barangay, municipality, contact
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7
+      )
+      ON CONFLICT (excel_id) DO UPDATE
+      SET
+        classification = EXCLUDED.classification,
+        name = EXCLUDED.name,
+        gender = EXCLUDED.gender,
+        barangay = EXCLUDED.barangay,
+        municipality = EXCLUDED.municipality,
+        contact = EXCLUDED.contact
+      RETURNING id
+    )
+    INSERT INTO beneficiary_distributions (
+      beneficiary_id, excel_id, species, quantity, cost, implementation_type, satisfaction, date_implemented
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      (SELECT id FROM upsert_beneficiary),
+      $1, $8, $9, $10, $11, $12, $13
     )
     ON CONFLICT (excel_id) DO UPDATE
     SET
-      classification = EXCLUDED.classification,
-      name = EXCLUDED.name,
-      gender = EXCLUDED.gender,
-      barangay = EXCLUDED.barangay,
-      municipality = EXCLUDED.municipality,
-      contact = EXCLUDED.contact,
       species = EXCLUDED.species,
       quantity = EXCLUDED.quantity,
       cost = EXCLUDED.cost,
@@ -151,20 +186,33 @@ const extractRows = (sheet) => {
 }
 
 const main = async () => {
-  const filePath = parseArgs()
+  const { filePath, year } = parseArgs()
 
   if (!fs.existsSync(filePath)) {
     console.error('File not found:', filePath)
     process.exit(1)
   }
 
+  if (year) {
+    defaultYear = year
+    console.log(`📅 Using year: ${year} for sheets without year in name`)
+  }
+
   console.log('📥 Importing Excel file:', filePath)
   const workbook = xlsx.readFile(filePath)
 
   let totalInserted = 0
+  let skippedByYear = 0
   for (const sheetName of workbook.SheetNames) {
     if (!isMonthlySheet(sheetName)) {
       console.log(`⚠️  Skipping sheet "${sheetName}" (not a monthly tab)`)
+      continue
+    }
+
+    // Filter by year if specified
+    if (year && !matchesYear(sheetName, year)) {
+      console.log(`⚠️  Skipping sheet "${sheetName}" (year doesn't match ${year})`)
+      skippedByYear++
       continue
     }
 
@@ -180,6 +228,10 @@ const main = async () => {
     await insertRows(normalized)
     totalInserted += normalized.length
     console.log(`✅ Imported ${normalized.length} rows from sheet "${sheetName}"`)
+  }
+
+  if (year && skippedByYear > 0) {
+    console.log(`📅 Filtered out ${skippedByYear} sheet(s) that didn't match year ${year}`)
   }
 
   console.log(`🎯 Finished import. ${totalInserted} rows inserted/updated.`)
