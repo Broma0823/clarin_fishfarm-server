@@ -27,3 +27,6 @@ server/.env
 *.njsproj
 *.sln
 *.sw?
+
+# PlatformIO (firmware build — do not commit)
+LilyGo/.pio/
