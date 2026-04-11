@@ -775,7 +775,7 @@ export const MonitoringDashboardContent = ({
 
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gridTemplateColumns: 'minmax(300px, 1fr)',
             gap: '1.5rem'
           }}>
             {/* Water Temperature Gauge */}
@@ -790,34 +790,6 @@ export const MonitoringDashboardContent = ({
               color="#ef4444"
               description="Temperature of pond water"
               tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 26-30°C. Too cold slows growth, too hot reduces oxygen levels."
-            />
-
-            {/* Dissolved Oxygen Gauge */}
-            <ParameterGauge
-              label="Dissolved Oxygen"
-              value={deviceReadings.dissolvedOxygen}
-              unit="mg/L"
-              min={4}
-              max={10}
-              optimalMin={5}
-              optimalMax={8}
-              color="#3b82f6"
-              description="Amount of oxygen in water"
-              tooltip="Dissolved oxygen is essential for fish respiration. Levels below 5 mg/L can stress fish, while 5-8 mg/L is ideal for healthy tilapia growth and activity."
-            />
-
-            {/* pH Level Gauge */}
-            <ParameterGauge
-              label="pH Level"
-              value={deviceReadings.phLevel}
-              unit=""
-              min={5}
-              max={9}
-              optimalMin={6.5}
-              optimalMax={8.5}
-              color="#8b5cf6"
-              description="Acidity/alkalinity of water"
-              tooltip="pH measures how acidic or basic the water is. Tilapia prefer neutral to slightly alkaline water (6.5-8.5). Extreme pH can harm fish health and affect nutrient availability."
             />
           </div>
         </div>

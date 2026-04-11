@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { AddRecordModal } from './components/AddRecordModal.jsx'
+import { BeneficiaryRecordsPanel } from './components/BeneficiaryRecordsPanel.jsx'
 import { MonitoringDashboardContent } from './components/MonitoringDashboard.jsx'
 import { CycleSummaryContent } from './components/CycleSummary.jsx'
 import { CyclesListContent } from './components/CyclesList.jsx'
@@ -10,6 +12,47 @@ const defaultCredentials = {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api'
+
+const SESSION_STORAGE_KEY = 'bfar_fishfarm_session'
+
+const readPersistedSession = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const email = typeof parsed?.email === 'string' ? parsed.email.trim() : ''
+    if (email === defaultCredentials.email) {
+      return { email }
+    }
+    window.localStorage.removeItem(SESSION_STORAGE_KEY)
+  } catch {
+    try {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
+  return null
+}
+
+const persistSession = (sessionUser) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+const clearPersistedSession = () => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
 
 const fallbackProduction = [
   { month: 'Jan 2019', fryCount: 65000 },
@@ -45,9 +88,8 @@ const formatSpecies = (species) => {
 function App() {
   const [credentials, setCredentials] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(() => readPersistedSession())
   const [activePanel, setActivePanel] = useState(null)
-  const [keyword, setKeyword] = useState('')
   const [classification, setClassification] = useState('individual')
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -62,7 +104,6 @@ function App() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingRecord, setEditingRecord] = useState(null)
-  const [openDropdownId, setOpenDropdownId] = useState(null)
   const [newRecord, setNewRecord] = useState({
     name: '',
     gender: '',
@@ -75,22 +116,9 @@ function App() {
     satisfaction: '',
     dateImplemented: '',
   })
-  const [selectedBeneficiary, setSelectedBeneficiary] = useState(null)
-  const [newBeneficiary, setNewBeneficiary] = useState({
-    name: '',
-    gender: '',
-    barangay: '',
-    municipality: '',
-  })
-  const [isCreatingBeneficiary, setIsCreatingBeneficiary] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showDatabaseTable, setShowDatabaseTable] = useState(false)
-  const [nameSuggestions, setNameSuggestions] = useState([])
-  const [showNameSuggestions, setShowNameSuggestions] = useState(false)
-  const [nameInputFocused, setNameInputFocused] = useState(false)
-  const nameSearchTimeoutRef = useRef(null)
-  
   // Monitoring Dashboard State
   const [monitoringParameters, setMonitoringParameters] = useState([])
   const [loadingMonitoring, setLoadingMonitoring] = useState(false)
@@ -120,24 +148,6 @@ function App() {
     notes: '',
   })
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      // Check if click is outside any dropdown
-      if (!event.target.closest('.action-dropdown') && !event.target.closest('button[title="Actions"]')) {
-        setOpenDropdownId(null)
-      }
-    }
-
-    if (openDropdownId !== null) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [openDropdownId])
-
   const handleLogin = (event) => {
     event.preventDefault()
     const isValid =
@@ -149,9 +159,10 @@ function App() {
       return
     }
 
-    setUser({ email: credentials.email })
+    const sessionUser = { email: defaultCredentials.email }
+    setUser(sessionUser)
+    persistSession(sessionUser)
     setError('')
-    void bootstrapSummary()
   }
 
   useEffect(() => {
@@ -407,17 +418,6 @@ function App() {
     }
   }, [user])
 
-  const filteredRecords = useMemo(() => {
-    const lower = keyword.toLowerCase()
-    return records.filter(
-      (record) =>
-        record.name?.toLowerCase().includes(lower) ||
-        record.barangay?.toLowerCase().includes(lower) ||
-        record.municipality?.toLowerCase().includes(lower) ||
-        record.species?.toLowerCase().includes(lower)
-    )
-  }, [keyword, records])
-
   const summaryStats = useMemo(() => {
     if (summary) {
       return {
@@ -553,47 +553,28 @@ function App() {
     const fetchDeviceReadings = async () => {
       setLoadingDeviceReadings(true)
       try {
-        // TODO: Replace with actual device API endpoint
-        // For now, simulating device readings
-        // In production, this would be: const response = await fetch(`${API_BASE_URL}/monitoring/device-readings`)
-        
-        // Simulate device readings with realistic values for tilapia farming
-        // Water Temperature: 26-30°C optimal for tilapia
-        // Dissolved Oxygen: 5-8 mg/L optimal
-        // pH Level: 6.5-8.5 optimal for tilapia
-        
-        // Simulate slight variations in readings
-        const baseTemp = 28.0
-        const baseDO = 6.5
-        const basePH = 7.2
-        
-        // Add small random variations (±1°C, ±0.5 mg/L, ±0.2 pH)
-        const waterTemp = (baseTemp + (Math.random() * 2 - 1)).toFixed(1)
-        const dissolvedOxygen = (baseDO + (Math.random() * 1 - 0.5)).toFixed(2)
-        const phLevel = (basePH + (Math.random() * 0.4 - 0.2)).toFixed(2)
-        
+        const response = await fetch(`${API_BASE_URL}/monitoring/latest`)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch latest monitoring data: ${response.status}`)
+        }
+
+        const payload = await response.json()
+        const latest = payload?.data
+
+        if (!latest) {
+          setDeviceReadings(null)
+          return
+        }
+
         setDeviceReadings({
-          waterTemperature: parseFloat(waterTemp),
-          dissolvedOxygen: parseFloat(dissolvedOxygen),
-          phLevel: parseFloat(phLevel),
-          timestamp: new Date().toISOString(),
+          waterTemperature: latest.waterTemperature ?? null,
+          dissolvedOxygen: latest.dissolvedOxygen ?? null,
+          phLevel: latest.phLevel ?? null,
+          timestamp: latest.recordedAt ?? new Date().toISOString(),
         })
-        
-        // In production, uncomment this:
-        // const response = await fetch(`${API_BASE_URL}/monitoring/device-readings`)
-        // if (response.ok) {
-        //   const data = await response.json()
-        //   setDeviceReadings(data)
-        // }
       } catch (err) {
         console.error('Failed to fetch device readings:', err)
-        // Set fallback values on error
-        setDeviceReadings({
-          waterTemperature: 28.0,
-          dissolvedOxygen: 6.5,
-          phLevel: 7.2,
-          timestamp: new Date().toISOString(),
-        })
+        setDeviceReadings(null)
       } finally {
         setLoadingDeviceReadings(false)
       }
@@ -782,11 +763,11 @@ function App() {
   }
 
   const handleLogout = () => {
+    clearPersistedSession()
     setUser(null)
     setActivePanel(null)
     setShowDatabaseTable(false)
     setToast('')
-    setKeyword('')
     setSelectedYear('')
     setSelectedMonth('')
     setClassification('individual')
@@ -795,288 +776,63 @@ function App() {
     setWeatherData(null)
   }
 
-  // Search for similar names as user types
-  const searchSimilarNames = async (name) => {
-    if (!name || name.trim().length < 2) {
-      setNameSuggestions([])
-      setShowNameSuggestions(false)
+  const handleAddModalFeedback = useCallback(async (payload) => {
+    if (payload.type === 'toast') {
+      setToast(payload.message)
       return
     }
-
-    try {
-      const params = new URLSearchParams({
-        name: name.trim(),
-        classification: classification || 'individual'
-      })
-      const response = await fetch(`${API_BASE_URL}/beneficiaries/search-similar?${params.toString()}`)
-      if (response.ok) {
-        const payload = await response.json()
-        setNameSuggestions(payload.data || [])
-        setShowNameSuggestions(payload.data && payload.data.length > 0 && nameInputFocused)
+    if (payload.type === 'saved') {
+      setToast(payload.message)
+      const params = new URLSearchParams({ classification: payload.classification })
+      if (payload.selectedYear) params.append('year', payload.selectedYear)
+      if (payload.selectedMonth) params.append('month', payload.selectedMonth)
+      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
+      if (refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json()
+        setRecords(refreshPayload.data ?? [])
       }
-    } catch (err) {
-      console.error('Error searching similar names:', err)
-      setNameSuggestions([])
     }
-  }
+  }, [])
 
-  // Handle name input change with debouncing
-  const handleNameChange = (value) => {
-    setSelectedBeneficiary(null)
-    setNewRecord({ ...newRecord, name: value })
-    // Clear previous timeout
-    if (nameSearchTimeoutRef.current) {
-      clearTimeout(nameSearchTimeoutRef.current)
-    }
-    // Debounce the search
-    nameSearchTimeoutRef.current = setTimeout(() => {
-      searchSimilarNames(value)
-    }, 300)
-  }
+  const closeAddModal = useCallback(() => setShowAddModal(false), [])
 
-  // Select a suggested name and auto-fill constant information
-  const selectSuggestedName = async (suggestion) => {
-    const nameToUse = suggestion.name || suggestion
-    setNewRecord({ ...newRecord, name: nameToUse })
-    setNameSuggestions([])
-    setShowNameSuggestions(false)
-    
-    // If suggestion has beneficiary info, auto-fill constant fields
-    if (suggestion.beneficiary) {
-      const beneficiary = suggestion.beneficiary
-      setSelectedBeneficiary(beneficiary)
-      setNewRecord(prev => ({
-        ...prev,
-        name: beneficiary.name || prev.name,
-        gender: beneficiary.gender || prev.gender,
-        barangay: beneficiary.barangay || prev.barangay,
-        municipality: beneficiary.municipality || prev.municipality,
-        // Keep non-constant fields empty: species, quantity, cost, implementationType, satisfaction, dateImplemented
-      }))
-    } else {
-      // Fetch full beneficiary info if not included in suggestion
+  const handleDeleteRecord = useCallback(
+    async (recordId) => {
+      if (!window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
+        return
+      }
+
       try {
-        const params = new URLSearchParams({
-          name: nameToUse,
-          classification: classification || 'individual'
+        const response = await fetch(`${API_BASE_URL}/distributions/${recordId}`, {
+          method: 'DELETE',
         })
-        const response = await fetch(`${API_BASE_URL}/beneficiaries/by-name?${params.toString()}`)
-        if (response.ok) {
+
+        if (!response.ok) {
           const payload = await response.json()
-          const beneficiary = payload.data
-          if (beneficiary) {
-            setSelectedBeneficiary(beneficiary)
-            setNewRecord(prev => ({
-              ...prev,
-              name: beneficiary.name || prev.name,
-              gender: beneficiary.gender || prev.gender,
-              barangay: beneficiary.barangay || prev.barangay,
-              municipality: beneficiary.municipality || prev.municipality,
-              // Keep non-constant fields empty: species, quantity, cost, implementationType, satisfaction, dateImplemented
-            }))
-          }
+          throw new Error(payload.error || 'Failed to delete record')
         }
+
+        setToast('Record deleted successfully!')
+
+        const params = new URLSearchParams({ classification })
+        if (selectedYear) params.append('year', selectedYear)
+        if (selectedMonth) params.append('month', selectedMonth)
+        const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
+        if (refreshResponse.ok) {
+          const refreshPayload = await refreshResponse.json()
+          setRecords(refreshPayload.data ?? [])
+        }
+
+        void bootstrapSummary()
       } catch (err) {
-        console.error('Error fetching beneficiary info:', err)
-        // Just set the name if fetch fails
-        setNewRecord({ ...newRecord, name: nameToUse })
+        console.error(err)
+        setToast(`Error: ${err.message}`)
       }
-    }
-  }
+    },
+    [classification, selectedYear, selectedMonth]
+  )
 
-  const clearSelectedBeneficiary = () => {
-    setSelectedBeneficiary(null)
-    setNewRecord(prev => ({
-      ...prev,
-      name: '',
-      gender: '',
-      barangay: '',
-      municipality: '',
-    }))
-  }
-
-  const handleCreateBeneficiary = async (event) => {
-    event.preventDefault()
-    if (!newBeneficiary.name.trim()) {
-      setToast('Please enter a beneficiary name before saving.')
-      return
-    }
-
-    setIsCreatingBeneficiary(true)
-    try {
-      const payload = {
-        excelId: `BEN-${Date.now()}`,
-        classification,
-        name: newBeneficiary.name.trim(),
-        gender: newBeneficiary.gender || null,
-        barangay: newBeneficiary.barangay || null,
-        municipality: newBeneficiary.municipality || null,
-      }
-
-      const response = await fetch(`${API_BASE_URL}/beneficiaries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const resultBody = await response.json()
-      if (!response.ok) {
-        throw new Error(resultBody.error || 'Failed to save beneficiary')
-      }
-
-      const saved = resultBody.data
-      setSelectedBeneficiary(saved)
-      setNewRecord(prev => ({
-        ...prev,
-        name: saved?.name || prev.name,
-        gender: saved?.gender || '',
-        barangay: saved?.barangay || '',
-        municipality: saved?.municipality || '',
-      }))
-      setNewBeneficiary({
-        name: '',
-        gender: '',
-        barangay: '',
-        municipality: '',
-      })
-      setNameSuggestions([])
-      setShowNameSuggestions(false)
-      setToast('Beneficiary saved. Now add distribution details.')
-    } catch (err) {
-      console.error(err)
-      setToast(`Error: ${err.message}`)
-    } finally {
-      setIsCreatingBeneficiary(false)
-    }
-  }
-
-  const handleAddRecord = async (event) => {
-    event.preventDefault()
-    if (!selectedBeneficiary?.id) {
-      setToast('Select an existing beneficiary or add one before saving the distribution.')
-      return
-    }
-    setIsSubmitting(true)
-    try {
-      const recordData = {
-        excelId: `MANUAL-${Date.now()}`,
-        beneficiaryId: selectedBeneficiary.id,
-        species: newRecord.species || null,
-        quantity: newRecord.quantity ? Number(newRecord.quantity) : null,
-        cost: newRecord.cost ? Number(newRecord.cost) : null,
-        implementationType: newRecord.implementationType || null,
-        satisfaction: newRecord.satisfaction || null,
-        dateImplemented: newRecord.dateImplemented || null,
-      }
-
-      const response = await fetch(`${API_BASE_URL}/distributions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recordData),
-      })
-
-      if (!response.ok) {
-        const payload = await response.json()
-        throw new Error(payload.error || 'Failed to add record')
-      }
-
-      const payload = await response.json()
-      
-      // Show message if name was normalized
-      let successMessage = 'Record added successfully!'
-      if (payload.normalized) {
-        successMessage = `Record added successfully! Name normalized from "${payload.normalized.original}" to "${payload.normalized.normalized}" to match existing records.`
-      }
-
-      setShowAddModal(false)
-      setSelectedBeneficiary(null)
-      setNewRecord({
-        name: '',
-        gender: '',
-        barangay: '',
-        municipality: '',
-        species: '',
-        quantity: '',
-        cost: '',
-        implementationType: '',
-        satisfaction: '',
-        dateImplemented: '',
-      })
-      setNewBeneficiary({
-        name: '',
-        gender: '',
-        barangay: '',
-        municipality: '',
-      })
-      setNameSuggestions([])
-      setShowNameSuggestions(false)
-      setToast(successMessage)
-      
-      // Refresh records
-      const params = new URLSearchParams({ classification })
-      if (selectedYear) params.append('year', selectedYear)
-      if (selectedMonth) params.append('month', selectedMonth)
-      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
-      if (refreshResponse.ok) {
-        const refreshPayload = await refreshResponse.json()
-        setRecords(refreshPayload.data ?? [])
-      }
-    } catch (err) {
-      console.error(err)
-      setToast(`Error: ${err.message}`)
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const handleDeleteRecord = async (recordId) => {
-    if (!window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-      return
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/distributions/${recordId}`, {
-        method: 'DELETE',
-      })
-
-      if (!response.ok) {
-        const payload = await response.json()
-        throw new Error(payload.error || 'Failed to delete record')
-      }
-
-      setToast('Record deleted successfully!')
-      setOpenDropdownId(null) // Close dropdown
-      
-      // Refresh records
-      const params = new URLSearchParams({ classification })
-      if (selectedYear) params.append('year', selectedYear)
-      if (selectedMonth) params.append('month', selectedMonth)
-      const refreshResponse = await fetch(`${API_BASE_URL}/distributions?${params.toString()}`)
-      if (refreshResponse.ok) {
-        const refreshPayload = await refreshResponse.json()
-        setRecords(refreshPayload.data ?? [])
-      }
-      
-      // Refresh summary
-      void bootstrapSummary()
-    } catch (err) {
-      console.error(err)
-      setToast(`Error: ${err.message}`)
-    }
-  }
-
-  const handleEditRecord = (record) => {
-    if (record.beneficiary_id || record.beneficiaryId) {
-      setSelectedBeneficiary({
-        id: record.beneficiary_id || record.beneficiaryId,
-        name: record.name,
-        gender: record.gender || '',
-        barangay: record.barangay || '',
-        municipality: record.municipality || '',
-      })
-    } else {
-      setSelectedBeneficiary(null)
-    }
-
+  const handleEditRecord = useCallback((record) => {
     setEditingRecord(record)
     setNewRecord({
       name: record.name || '',
@@ -1091,8 +847,7 @@ function App() {
       dateImplemented: record.dateImplemented || record.date_implemented || '',
     })
     setShowEditModal(true)
-    setOpenDropdownId(null) // Close dropdown
-  }
+  }, [])
 
   const handleUpdateRecord = async (event) => {
     event.preventDefault()
@@ -1467,173 +1222,21 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="database-table-view">
-                <div className="filter-section">
-                  <div className="toggle">
-                    <button
-                      type="button"
-                      className={classification === 'individual' ? 'toggle-btn active' : 'toggle-btn'}
-                      onClick={() => setClassification('individual')}
-                    >
-                      Individuals
-                    </button>
-                    <button
-                      type="button"
-                      className={classification === 'group' ? 'toggle-btn active' : 'toggle-btn'}
-                      onClick={() => setClassification('group')}
-                    >
-                      Groups
-                    </button>
-                  </div>
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="filter-select"
-                  >
-                    <option value="">All Years</option>
-                    <option value="2019">2019</option>
-                    <option value="2020">2020</option>
-                    <option value="2021">2021</option>
-                    <option value="2022">2022</option>
-                    <option value="2023">2023</option>
-                    <option value="2024">2024</option>
-                    <option value="2025">2025</option>
-                  </select>
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="filter-select"
-                  >
-                    <option value="">All Months</option>
-                    <option value="1">January</option>
-                    <option value="2">February</option>
-                    <option value="3">March</option>
-                    <option value="4">April</option>
-                    <option value="5">May</option>
-                    <option value="6">June</option>
-                    <option value="7">July</option>
-                    <option value="8">August</option>
-                    <option value="9">September</option>
-                    <option value="10">October</option>
-                    <option value="11">November</option>
-                    <option value="12">December</option>
-                  </select>
-                  <input
-                    type="search"
-                    placeholder="Search name, barangay, or municipality"
-                    value={keyword}
-                    onChange={(event) => setKeyword(event.target.value)}
-                    className="search-input"
-                  />
-                </div>
-
-                <div className="table-wrapper">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Beneficiary</th>
-                        <th>Gender</th>
-                        <th>Barangay</th>
-                        <th>Municipality</th>
-                        <th>Species</th>
-                        <th>Quantity (pcs)</th>
-                        <th>Implementation</th>
-                        <th>Satisfaction</th>
-                        <th>Date</th>
-                        <th style={{ width: '80px', textAlign: 'center' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingRecords ? (
-                        <tr>
-                          <td colSpan={10} className="muted small">
-                            Loading latest entries…
-                          </td>
-                        </tr>
-                      ) : filteredRecords.length ? (
-                        filteredRecords.map((record, index) => (
-                          <tr key={`${record.id ?? record.excel_id ?? index}`}>
-                            <td>{record.name}</td>
-                            <td>{record.gender}</td>
-                            <td>{record.barangay}</td>
-                            <td>{record.municipality}</td>
-                            <td>{formatSpecies(record.species)}</td>
-                            <td>{formatNumber(record.quantity)}</td>
-                            <td>{record.implementationType || record.implementation_type}</td>
-                            <td>{record.satisfaction}</td>
-                            <td>
-                              {formatDate(record.dateImplemented ?? record.date_implemented)}
-                            </td>
-                            <td style={{ textAlign: 'center', position: 'relative' }}>
-                              {record.id && (
-                                <div style={{ position: 'relative', display: 'inline-block' }}>
-                                  <button
-                                    onClick={() => setOpenDropdownId(openDropdownId === record.id ? null : record.id)}
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      color: '#666',
-                                      cursor: 'pointer',
-                                      padding: '0.5rem',
-                                      borderRadius: '4px',
-                                      fontSize: '1rem',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      transition: 'background-color 0.2s',
-                                      width: '32px',
-                                      height: '32px'
-                                    }}
-                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                                    title="Actions"
-                                  >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <circle cx="12" cy="12" r="1"></circle>
-                                      <circle cx="12" cy="5" r="1"></circle>
-                                      <circle cx="12" cy="19" r="1"></circle>
-                                    </svg>
-                                  </button>
-                                  {openDropdownId === record.id && (
-                                    <div className="action-dropdown">
-                                      <button
-                                        className="dropdown-item"
-                                        onClick={() => handleEditRecord(record)}
-                                      >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                                        </svg>
-                                        Edit
-                                      </button>
-                                      <button
-                                        className="dropdown-item delete-item"
-                                        onClick={() => handleDeleteRecord(record.id)}
-                                      >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                          <polyline points="3 6 5 6 21 6"></polyline>
-                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                        </svg>
-                                        Delete
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={10} className="muted small">
-                            No records found for this filter.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <BeneficiaryRecordsPanel
+                records={records}
+                loadingRecords={loadingRecords}
+                classification={classification}
+                onClassificationChange={setClassification}
+                selectedYear={selectedYear}
+                onSelectedYearChange={setSelectedYear}
+                selectedMonth={selectedMonth}
+                onSelectedMonthChange={setSelectedMonth}
+                onEditRecord={handleEditRecord}
+                onDeleteRecord={handleDeleteRecord}
+                formatNumber={formatNumber}
+                formatDate={formatDate}
+                formatSpecies={formatSpecies}
+              />
             )}
           </section>
         )}
@@ -2648,317 +2251,15 @@ function App() {
         )}
 
 
-        {showAddModal && (
-          <div className="modal-overlay" onClick={() => !isSubmitting && setShowAddModal(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2>Add New Record</h2>
-                <button
-                  className="modal-close"
-                  onClick={() => !isSubmitting && setShowAddModal(false)}
-                  disabled={isSubmitting}
-                >
-                  ×
-                </button>
-              </div>
-              <form onSubmit={handleAddRecord} className="add-record-form">
-                <div className="form-row">
-                  <label className="field" style={{ position: 'relative' }}>
-                    <span>Name / Beneficiary *</span>
-                    <input
-                      type="text"
-                      value={selectedBeneficiary ? selectedBeneficiary.name : newRecord.name}
-                      onChange={(e) => handleNameChange(e.target.value)}
-                      onFocus={() => {
-                        setNameInputFocused(true)
-                        if (nameSuggestions.length > 0) {
-                          setShowNameSuggestions(true)
-                        }
-                      }}
-                      onBlur={() => {
-                        setNameInputFocused(false)
-                        // Delay hiding suggestions to allow clicking on them
-                        setTimeout(() => setShowNameSuggestions(false), 200)
-                      }}
-                      required
-                      disabled={isSubmitting}
-                      placeholder="Search existing beneficiary..."
-                    />
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.35rem' }}>
-                      Select an existing beneficiary. If not found, add them below, then continue with the distribution details.
-                    </div>
-                    {showNameSuggestions && nameSuggestions.length > 0 && (
-                      <div 
-                        style={{
-                          position: 'absolute',
-                          top: '100%',
-                          left: 0,
-                          right: 0,
-                          background: 'white',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                          zIndex: 1000,
-                          maxHeight: '200px',
-                          overflowY: 'auto',
-                          marginTop: '4px'
-                        }}
-                      >
-                        <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#64748b', borderBottom: '1px solid #e5e7eb', background: '#f8f9fa' }}>
-                          Similar names found (click to use):
-                        </div>
-                        {nameSuggestions.map((suggestion, idx) => (
-                          <div
-                            key={idx}
-                            onClick={() => selectSuggestedName(suggestion)}
-                            style={{
-                              padding: '0.75rem',
-                              cursor: 'pointer',
-                              borderBottom: idx < nameSuggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
-                              transition: 'background 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.target.style.background = '#f8f9fa'}
-                            onMouseLeave={(e) => e.target.style.background = 'white'}
-                          >
-                            <div style={{ fontWeight: '600', color: '#1a202c' }}>{suggestion.name}</div>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                              {Math.round(suggestion.similarity * 100)}% match
-                              {suggestion.beneficiary && (
-                                <span style={{ marginLeft: '0.5rem', color: '#059669', fontWeight: '500' }}>
-                                  • Will auto-fill info
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </label>
-                  <label className="field">
-                    <span>Gender</span>
-                    <select
-                      value={selectedBeneficiary?.gender ?? newRecord.gender}
-                      onChange={(e) => setNewRecord({ ...newRecord, gender: e.target.value })}
-                      disabled={isSubmitting || !!selectedBeneficiary}
-                    >
-                      <option value="">Select...</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                    </select>
-                  </label>
-                </div>
-
-                {selectedBeneficiary && (
-                  <div
-                    style={{
-                      margin: '0.5rem 0 1rem',
-                      padding: '0.75rem',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      background: '#f8fafc',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: '1rem',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#111827' }}>{selectedBeneficiary.name}</div>
-                      <div style={{ fontSize: '0.9rem', color: '#374151' }}>
-                        {selectedBeneficiary.gender || '—'} · {selectedBeneficiary.barangay || '—'} · {selectedBeneficiary.municipality || '—'}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={clearSelectedBeneficiary}
-                      disabled={isSubmitting}
-                      className="cancel-button"
-                      style={{ padding: '0.5rem 0.75rem' }}
-                    >
-                      Change beneficiary
-                    </button>
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    marginBottom: '1rem',
-                    border: '1px dashed #cbd5e1',
-                    borderRadius: '10px',
-                    padding: '0.75rem',
-                    background: '#f8fafc'
-                  }}
-                >
-                  <div style={{ fontWeight: 600, color: '#1f2937', marginBottom: '0.5rem' }}>
-                    Add beneficiary (if not found)
-                  </div>
-                  <div className="form-row">
-                    <label className="field">
-                      <span>Name *</span>
-                      <input
-                        type="text"
-                        value={newBeneficiary.name}
-                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, name: e.target.value })}
-                        disabled={isCreatingBeneficiary}
-                        placeholder="Full name"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Gender</span>
-                      <select
-                        value={newBeneficiary.gender}
-                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, gender: e.target.value })}
-                        disabled={isCreatingBeneficiary}
-                      >
-                        <option value="">Select...</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div className="form-row">
-                    <label className="field">
-                      <span>Barangay</span>
-                      <input
-                        type="text"
-                        value={newBeneficiary.barangay}
-                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, barangay: e.target.value })}
-                        disabled={isCreatingBeneficiary}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Municipality</span>
-                      <input
-                        type="text"
-                        value={newBeneficiary.municipality}
-                        onChange={(e) => setNewBeneficiary({ ...newBeneficiary, municipality: e.target.value })}
-                        disabled={isCreatingBeneficiary}
-                      />
-                    </label>
-                  </div>
-                  <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                    <button
-                      type="button"
-                      className="submit-button"
-                      onClick={handleCreateBeneficiary}
-                      disabled={isCreatingBeneficiary}
-                      style={{ padding: '0.5rem 1rem' }}
-                    >
-                      {isCreatingBeneficiary ? 'Saving...' : 'Save Beneficiary'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <label className="field">
-                    <span>Barangay</span>
-                    <input
-                      type="text"
-                      value={selectedBeneficiary?.barangay ?? newRecord.barangay}
-                      onChange={(e) => setNewRecord({ ...newRecord, barangay: e.target.value })}
-                      disabled={isSubmitting || !!selectedBeneficiary}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Municipality</span>
-                    <input
-                      type="text"
-                      value={selectedBeneficiary?.municipality ?? newRecord.municipality}
-                      onChange={(e) => setNewRecord({ ...newRecord, municipality: e.target.value })}
-                      disabled={isSubmitting || !!selectedBeneficiary}
-                    />
-                  </label>
-                </div>
-                <div className="form-row">
-                  <label className="field">
-                    <span>Species</span>
-                    <input
-                      type="text"
-                      value={newRecord.species}
-                      onChange={(e) => setNewRecord({ ...newRecord, species: e.target.value })}
-                      placeholder="e.g., Tilapia"
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Quantity (pcs)</span>
-                    <input
-                      type="number"
-                      value={newRecord.quantity}
-                      onChange={(e) => setNewRecord({ ...newRecord, quantity: e.target.value })}
-                      min="0"
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                </div>
-                <div className="form-row">
-                  <label className="field">
-                    <span>Cost (PHP)</span>
-                    <input
-                      type="number"
-                      value={newRecord.cost}
-                      onChange={(e) => setNewRecord({ ...newRecord, cost: e.target.value })}
-                      min="0"
-                      step="0.01"
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Implementation Type</span>
-                    <input
-                      type="text"
-                      value={newRecord.implementationType}
-                      onChange={(e) => setNewRecord({ ...newRecord, implementationType: e.target.value })}
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                </div>
-                <div className="form-row">
-                  <label className="field">
-                    <span>Satisfaction</span>
-                    <select
-                      value={newRecord.satisfaction}
-                      onChange={(e) => setNewRecord({ ...newRecord, satisfaction: e.target.value })}
-                      disabled={isSubmitting}
-                    >
-                      <option value="">Select...</option>
-                      <option value="Satisfied">Satisfied</option>
-                      <option value="Very Satisfied">Very Satisfied</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Dissatisfied">Dissatisfied</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Date Implemented</span>
-                    <input
-                      type="date"
-                      value={newRecord.dateImplemented}
-                      onChange={(e) => setNewRecord({ ...newRecord, dateImplemented: e.target.value })}
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                </div>
-                <div className="modal-actions">
-                  <button
-                    type="button"
-                    className="cancel-button"
-                    onClick={() => setShowAddModal(false)}
-                    disabled={isSubmitting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="submit-button"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? 'Adding...' : 'Add Record'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+        <AddRecordModal
+          open={showAddModal}
+          onClose={closeAddModal}
+          apiBaseUrl={API_BASE_URL}
+          classification={classification}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          onAdded={handleAddModalFeedback}
+        />
 
         {showEditModal && editingRecord && (
           <div className="modal-overlay" onClick={() => !isSubmitting && setShowEditModal(false)}>
