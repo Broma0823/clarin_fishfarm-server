@@ -40,12 +40,20 @@ export const listDistributions = async (req, res, next) => {
       barangay,
       year,
       month,
-      limit = 500,
+      limit: limitParam,
     } = req.query
 
     const { clauses, values } = buildFilters({ classification, municipality, barangay, year, month })
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-    const limitValue = Math.min(Number(limit) || 500, 2000)
+
+    // No default LIMIT: the admin UI needs the full filtered set (e.g. all months in a year).
+    // Pass ?limit=500 to cap results; max 50_000 to avoid accidental huge responses.
+    let limitSql = ''
+    if (limitParam !== undefined && limitParam !== '') {
+      const n = Number(limitParam)
+      const limitValue = Math.min(Math.max(1, Number.isFinite(n) ? n : 500), 50000)
+      limitSql = `LIMIT ${limitValue}`
+    }
 
     const sql = `
       SELECT
@@ -67,7 +75,7 @@ export const listDistributions = async (req, res, next) => {
       JOIN beneficiaries b ON b.id = d.beneficiary_id
       ${where}
       ORDER BY d.date_implemented ASC NULLS LAST, d.id ASC
-      LIMIT ${limitValue};
+      ${limitSql};
     `
 
     const result = await query(sql, values)

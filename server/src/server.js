@@ -12,9 +12,10 @@ const start = async () => {
     await pool.query('SELECT 1')
     console.log('✅ Database connection successful!')
     
-    app.listen(env.port, () => {
-      console.log(`🚀 BFAR API listening on http://localhost:${env.port}`)
-      console.log(`📊 API endpoint: http://localhost:${env.port}/api`)
+    app.listen(env.port, env.host, () => {
+      const base = `http://${env.host === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : env.host}:${env.port}`
+      console.log(`🚀 BFAR API listening on ${base}`)
+      console.log(`📊 API base path: /api  (e.g. http://<this-machine-ip>:${env.port}/api/health)`)
     })
   } catch (error) {
     console.error('\n❌ Unable to start server!\n')

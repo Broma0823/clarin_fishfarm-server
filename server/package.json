@@ -10,7 +10,8 @@
     "migrate": "node scripts/runMigrations.js",
     "setup": "node scripts/setup-db.js",
     "import": "node scripts/importExcel.js --file",
-    "delete-records": "node scripts/deleteRecords.js"
+    "delete-records": "node scripts/deleteRecords.js",
+    "normalize-beneficiaries": "node scripts/normalizeBeneficiaryFields.js"
   },
   "keywords": [],
   "author": "",

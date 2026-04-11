@@ -59,25 +59,167 @@ export function similarityScore(str1, str2) {
   return 1 - (distance / maxLength)
 }
 
+const escapeReg = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
- * Normalize a name string (trim, remove extra spaces, capitalize properly)
+ * Treat "Surname, Given [Middle…]" (comma after surname) as standard form input and
+ * reorder to "Given … Surname" so the family name is always last, e.g. "Camposo, Kris" → "Kris Camposo".
+ * Only the first comma splits surname vs given; extra commas in the given part become spaces.
+ */
+export function reorderLastCommaFirst(name) {
+  if (!name || typeof name !== 'string') return ''
+
+  let s = name.trim().replace(/\s+/g, ' ')
+  s = s.replace(/\s*,\s*/g, ', ')
+
+  const commaIdx = s.indexOf(',')
+  if (commaIdx === -1) return s
+
+  const lastPart = s.slice(0, commaIdx).trim()
+  let firstPart = s.slice(commaIdx + 1).trim().replace(/\s*,\s*/g, ' ')
+  firstPart = firstPart.replace(/\s+/g, ' ').trim()
+
+  if (!lastPart || !firstPart) {
+    return s.replace(/,/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+
+  return `${firstPart} ${lastPart}`.replace(/\s+/g, ' ').trim()
+}
+
+/** Normalize token for suffix lookup (strip trailing period, lowercase). */
+const suffixLookupKey = (word) =>
+  String(word ?? '')
+    .trim()
+    .replace(/\.$/, '')
+    .toLowerCase()
+
+/** Generational / ordinal suffixes → canonical trailing form. */
+const SUFFIX_CANONICAL = new Map([
+  ['jr', 'Jr.'],
+  ['sr', 'Sr.'],
+  ['ii', 'II'],
+  ['iii', 'III'],
+  ['iv', 'IV'],
+  ['vi', 'VI'],
+  ['vii', 'VII'],
+  ['2nd', '2nd'],
+  ['3rd', '3rd'],
+  ['4th', '4th'],
+])
+
+export function isNameSuffixToken(word) {
+  const key = suffixLookupKey(word)
+  return key.length > 0 && SUFFIX_CANONICAL.has(key)
+}
+
+export function formatNameSuffix(word) {
+  const key = suffixLookupKey(word)
+  return SUFFIX_CANONICAL.get(key) ?? word
+}
+
+/**
+ * Move generational suffix tokens to the very end: "Cresencio Jr. Camposo" → "Cresencio Camposo Jr."
+ */
+export function moveSuffixesToEnd(words) {
+  if (!words || words.length === 0) return []
+  const base = []
+  const suffixes = []
+  for (const w of words) {
+    if (!w) continue
+    if (isNameSuffixToken(w)) suffixes.push(w)
+    else base.push(w)
+  }
+  return [...base, ...suffixes]
+}
+
+const titleCaseWord = (word) => {
+  if (!word || word.length === 0) return ''
+  if (word.length === 1) return word.toUpperCase()
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+}
+
+/**
+ * Fingerprint with word order ignored (handles "Japhet Ken Candog" vs "Candog, Japhet Ken").
+ */
+export function nameSortKey(name) {
+  if (!name || typeof name !== 'string') return ''
+  return name
+    .toLowerCase()
+    .replace(/,/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((t) => t.length > 0)
+    .sort()
+    .join(' ')
+}
+
+/**
+ * Strong match if every significant token (2+ chars) from one side appears as a whole word in the other.
+ */
+export function tokenCoverageScore(a, b) {
+  const na = normalizeName(a)
+    .toLowerCase()
+    .replace(/,/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const nb = normalizeName(b)
+    .toLowerCase()
+    .replace(/,/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const wordsA = na.split(' ').filter((t) => t.length >= 2)
+  const wordsB = nb.split(' ').filter((t) => t.length >= 2)
+  if (wordsA.length === 0 && wordsB.length === 0) return 0
+
+  const covers = (tokens, haystack) => {
+    if (tokens.length === 0) return false
+    return tokens.every((w) => new RegExp(`(^|\\s)${escapeReg(w)}(\\s|$)`, 'i').test(haystack))
+  }
+
+  if (covers(wordsA, nb) || covers(wordsB, na)) return 0.92
+  return 0
+}
+
+/**
+ * Best of: direct similarity, order-agnostic token sort, token coverage (full names vs "Last, First").
+ */
+export function nameMatchScore(inputName, existingName) {
+  const ni = normalizeName(inputName)
+  const ne = normalizeName(existingName)
+  if (!ni || !ne) return 0
+
+  const direct = similarityScore(ni, ne)
+  const sorted = similarityScore(nameSortKey(inputName), nameSortKey(existingName))
+  const tokens = tokenCoverageScore(inputName, existingName)
+
+  return Math.max(direct, sorted, tokens)
+}
+
+/**
+ * Normalize a name: "Last, First …" → "First … Last" (surname last), suffixes last (Jr., III, …),
+ * trim, collapse spaces, title-case given + surname only.
  * @param {string} name - Name to normalize
  * @returns {string} - Normalized name
  */
 export function normalizeName(name) {
   if (!name || typeof name !== 'string') return ''
-  
-  return name
-    .trim()
-    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-    .split(' ')
-    .map(word => {
-      // Capitalize first letter, lowercase the rest
-      if (word.length === 0) return ''
-      if (word.length === 1) return word.toUpperCase()
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-    })
-    .join(' ')
+
+  const reordered = reorderLastCommaFirst(name)
+  const rawWords = reordered.trim().replace(/\s+/g, ' ').split(' ').filter((w) => w.length > 0)
+  const ordered = moveSuffixesToEnd(rawWords)
+
+  const parts = []
+  for (const word of ordered) {
+    if (isNameSuffixToken(word)) {
+      parts.push(formatNameSuffix(word))
+    } else {
+      const t = titleCaseWord(word)
+      if (t) parts.push(t)
+    }
+  }
+
+  return parts.join(' ')
 }
 
 /**
@@ -92,22 +234,24 @@ export function findBestMatch(inputName, existingNames, threshold = 0.8) {
     return null
   }
 
-  const normalizedInput = normalizeName(inputName)
+  if (!normalizeName(inputName)) {
+    return null
+  }
+
   let bestMatch = null
   let bestScore = 0
 
   for (const existingName of existingNames) {
     if (!existingName) continue
-    
-    const normalizedExisting = normalizeName(existingName)
-    const score = similarityScore(normalizedInput, normalizedExisting)
-    
+
+    const score = nameMatchScore(inputName, existingName)
+
     if (score >= threshold && score > bestScore) {
       bestScore = score
       bestMatch = {
-        name: normalizedExisting, // Return the normalized version of the existing name
+        name: normalizeName(existingName),
         similarity: score,
-        original: existingName
+        original: existingName,
       }
     }
   }
@@ -127,20 +271,22 @@ export function findSimilarNames(inputName, existingNames, threshold = 0.7) {
     return []
   }
 
-  const normalizedInput = normalizeName(inputName)
+  if (!normalizeName(inputName)) {
+    return []
+  }
+
   const matches = []
 
   for (const existingName of existingNames) {
     if (!existingName) continue
-    
-    const normalizedExisting = normalizeName(existingName)
-    const score = similarityScore(normalizedInput, normalizedExisting)
-    
+
+    const score = nameMatchScore(inputName, existingName)
+
     if (score >= threshold) {
       matches.push({
-        name: normalizedExisting,
+        name: normalizeName(existingName),
         similarity: score,
-        original: existingName
+        original: existingName,
       })
     }
   }

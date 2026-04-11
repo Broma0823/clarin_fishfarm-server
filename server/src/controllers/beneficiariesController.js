@@ -87,8 +87,7 @@ export const createBeneficiary = async (req, res, next) => {
       const bestMatch = findBestMatch(normalizedName, existingNames, 0.85)
       
       if (bestMatch) {
-        // Use the existing normalized name to prevent duplicates
-        normalizedName = bestMatch.name
+        normalizedName = bestMatch.original
       }
     }
 
@@ -165,13 +164,13 @@ export const searchSimilarNames = async (req, res, next) => {
       }
     })
     
-    // Find similar names (threshold: 0.7 = 70% similarity)
-    const similarNames = findSimilarNames(name, existingNames, 0.7)
-    
-    // Add beneficiary info to each match
-    const matchesWithInfo = similarNames.slice(0, 10).map(match => ({
+    const queryName = name.trim()
+    const similarNames = findSimilarNames(queryName, existingNames, 0.65)
+
+    const matchesWithInfo = similarNames.slice(0, 10).map((match) => ({
       ...match,
-      beneficiary: beneficiariesMap[match.name] || null
+      name: match.original,
+      beneficiary: beneficiariesMap[match.original] || null,
     }))
     
     res.json({ 
@@ -193,18 +192,37 @@ export const getBeneficiaryByName = async (req, res, next) => {
       return res.status(400).json({ error: 'Name is required' })
     }
 
-    // Get the most recent record for this beneficiary name
+    const cls = classification || 'individual'
+    const trimmed = name.trim()
+
     const sql = `
       SELECT id, name, gender, barangay, municipality, contact
       FROM beneficiaries 
       WHERE classification = $1
-      AND LOWER(TRIM(name)) = LOWER(TRIM($2))
+      AND LOWER(TRIM(REGEXP_REPLACE(name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE($2, '\\s+', ' ', 'g')))
       ORDER BY date_implemented DESC NULLS LAST, created_at DESC
       LIMIT 1
     `
-    const result = await query(sql, [classification || 'individual', name])
-    
+    let result = await query(sql, [cls, trimmed])
+
     if (result.rows.length === 0) {
+      const allSql = `
+        SELECT DISTINCT ON (name) id, name, gender, barangay, municipality, contact
+        FROM beneficiaries 
+        WHERE classification = $1
+        AND name IS NOT NULL
+        AND name != ''
+        ORDER BY name, date_implemented DESC NULLS LAST, created_at DESC
+      `
+      const allRows = await query(allSql, [cls])
+      const existingNames = allRows.rows.map((r) => r.name)
+      const best = findBestMatch(trimmed, existingNames, 0.72)
+      if (best) {
+        const row = allRows.rows.find((r) => r.name === best.original)
+        if (row) {
+          return res.json({ data: row })
+        }
+      }
       return res.status(404).json({ error: 'Beneficiary not found' })
     }
 

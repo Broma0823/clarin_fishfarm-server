@@ -3,7 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import xlsx from 'xlsx'
 import { fileURLToPath } from 'url'
+import { createHash } from 'crypto'
 import { query } from '../src/db/pool.js'
+import { normalizeName } from '../src/utils/nameNormalizer.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -52,8 +54,14 @@ const parseArgs = () => {
     process.exit(1)
   }
 
-  const filePath = path.resolve(__dirname, '..', fileArg.split('=')[1])
-  const year = yearArg ? yearArg.split('=')[1] : null
+  const relativePath = fileArg.replace(/^--file=+/, '').trim()
+  if (!relativePath) {
+    console.error('Invalid --file: missing path (use --file=../data/file.xlsx)')
+    process.exit(1)
+  }
+
+  const filePath = path.resolve(__dirname, '..', relativePath)
+  const year = yearArg ? yearArg.replace(/^--year=+/, '').trim() : null
 
   return { filePath, year }
 }
@@ -69,13 +77,11 @@ const isMonthlySheet = (name = '') => {
 }
 
 const matchesYear = (sheetName, targetYear) => {
-  if (!targetYear) return true // No filter if year not specified
+  if (!targetYear) return true
   const yearMatch = sheetName.match(/\d{4}/)
   if (yearMatch) {
-    // Sheet has a year - only include if it matches
     return yearMatch[0] === String(targetYear)
   }
-  // Sheet doesn't have a year - include it (will use defaultYear)
   return true
 }
 
@@ -85,42 +91,144 @@ const toNumber = (value) => {
   return Number.isFinite(cleaned) ? cleaned : null
 }
 
-const normalizeRow = (row, sheetName) => {
-  const name = row[1]
-  const gender = row[2]
+const isGenderCell = (value) => {
+  if (value === null || value === undefined || value === '') return false
+  const s = String(value).trim().toLowerCase()
+  return s === 'male' || s === 'female' || s === 'm' || s === 'f'
+}
 
-  if (!name || !gender) {
-    return null
-  }
+/** Stable key: one beneficiary row per person + location (re-import safe). */
+const beneficiaryExcelId = (fullName, barangay, municipality) => {
+  const parts = [
+    String(fullName ?? '').trim().toLowerCase(),
+    String(barangay ?? '').trim().toLowerCase(),
+    String(municipality ?? '').trim().toLowerCase(),
+  ].join('|')
+  const hash = createHash('sha256').update(parts).digest('hex').slice(0, 24)
+  return `ben-${hash}`
+}
 
-  return {
-    excel_id: `${row[1]}-${row[3] ?? ''}-${row[4] ?? ''}`,
-    classification: 'individual',
-    name,
-    gender,
-    barangay: row[3] ?? null,
-    municipality: row[4] ?? null,
-    contact: row[5] ?? null,
-    species: row[6] ?? null,
-    quantity: toNumber(row[7]),
-    cost: toNumber(row[8]) ? toNumber(row[8]) * 1000 : null,
-    implementation_type: row[9] ?? null,
-    satisfaction: row[10] ?? null,
-    date_implemented: buildDate(row[0], sheetName),
-  }
+/** Unique per spreadsheet row so each month's distribution is kept (no overwrite). */
+const distributionExcelId = (sheetName, rowIndex, dayValue, beneficiaryKey) => {
+  const sheet = String(sheetName).replace(/\s+/g, '-')
+  const short = createHash('sha256').update(`${sheet}|r${rowIndex}|d${dayValue}|${beneficiaryKey}`).digest('hex').slice(0, 20)
+  return `dist-${sheet}-r${rowIndex}-d${dayValue}-${short}`
 }
 
 let defaultYear = null
 
 const buildDate = (dayValue, sheetName) => {
-  if (!dayValue) return null
+  if (dayValue === null || dayValue === undefined || dayValue === '') return null
+
+  if (typeof dayValue === 'number' && dayValue > 20000) {
+    const epoch = new Date(Date.UTC(1899, 11, 30))
+    const d = new Date(epoch.getTime() + dayValue * 86400000)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
   const month = `${sheetName}`.split(' ')[0]
   if (!month) return null
-  // Extract year from sheet name (e.g., "January 2020" -> "2020")
   const yearMatch = sheetName.match(/\d{4}/)
   const year = yearMatch ? yearMatch[0] : (defaultYear || new Date().getFullYear())
   const date = new Date(`${month} ${dayValue}, ${year}`)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+/** "First [Middle] Last" — surname last (e.g. Camposo); middle omitted if blank. */
+const formatFullName = (last, first, middle) => {
+  const l = String(last ?? '').trim()
+  const f = String(first ?? '').trim()
+  const m = String(middle ?? '').trim()
+  const given = [f, m].filter(Boolean).join(' ')
+  if (l && given) return `${given} ${l}`.replace(/\s+/g, ' ').trim()
+  if (l) return l
+  return given
+}
+
+/**
+ * Layout A: DATE, Full name, Gender, Barangay, … (early 2024 sheets e.g. Jan–Mar)
+ * Layout B: DATE, Last, First, Gender, … (gender col D — no middle column)
+ * Layout C: DATE, Last, First, Middle (optional), Gender, … (gender col E — e.g. Dec/Nov/Oct 2024)
+ *
+ * Per-row: try C then B then A (scanned 2024.xlsx uses different layouts by month).
+ */
+const normalizeRow = (row, sheetName, rowIndex) => {
+  let fullName
+  let gender
+  let barangay
+  let municipality
+  let contact
+  let species
+  let quantity
+  let cost
+  let implementation_type
+  let satisfaction
+
+  if (isGenderCell(row[4])) {
+    const last = String(row[1] ?? '').trim()
+    const first = String(row[2] ?? '').trim()
+    fullName = formatFullName(last, first, row[3])
+    gender = row[4]
+    barangay = row[5] ?? null
+    municipality = row[6] ?? null
+    contact = row[7] ?? null
+    species = row[8] ?? null
+    quantity = toNumber(row[9])
+    cost = toNumber(row[10]) ? toNumber(row[10]) * 1000 : null
+    implementation_type = row[11] ?? null
+    satisfaction = row[12] ?? null
+  } else if (isGenderCell(row[3])) {
+    const last = String(row[1] ?? '').trim()
+    const first = String(row[2] ?? '').trim()
+    fullName = formatFullName(last, first, '')
+    gender = row[3]
+    barangay = row[4] ?? null
+    municipality = row[5] ?? null
+    contact = row[6] ?? null
+    species = row[7] ?? null
+    quantity = toNumber(row[8])
+    cost = toNumber(row[9]) ? toNumber(row[9]) * 1000 : null
+    implementation_type = row[10] ?? null
+    satisfaction = row[11] ?? null
+  } else if (isGenderCell(row[2])) {
+    fullName = String(row[1] ?? '').trim()
+    gender = row[2]
+    barangay = row[3] ?? null
+    municipality = row[4] ?? null
+    contact = row[5] ?? null
+    species = row[6] ?? null
+    quantity = toNumber(row[7])
+    cost = toNumber(row[8]) ? toNumber(row[8]) * 1000 : null
+    implementation_type = row[9] ?? null
+    satisfaction = row[10] ?? null
+  } else {
+    return null
+  }
+
+  if (!fullName || !gender) {
+    return null
+  }
+
+  const nameForDb = normalizeName(String(fullName).trim()) || String(fullName).trim().replace(/\s+/g, ' ')
+  const benId = beneficiaryExcelId(nameForDb, barangay, municipality)
+  const distId = distributionExcelId(sheetName, rowIndex, row[0], benId)
+
+  return {
+    beneficiary_excel_id: benId,
+    distribution_excel_id: distId,
+    classification: 'individual',
+    name: nameForDb,
+    gender,
+    barangay,
+    municipality,
+    contact,
+    species,
+    quantity,
+    cost,
+    implementation_type,
+    satisfaction,
+    date_implemented: buildDate(row[0], sheetName),
+  }
 }
 
 const insertRows = async (rows) => {
@@ -129,7 +237,7 @@ const insertRows = async (rows) => {
       INSERT INTO beneficiaries (
         excel_id, classification, name, gender, barangay, municipality, contact
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7
+        $1, $2, $3, $4, $5, $6, $7
       )
       ON CONFLICT (excel_id) DO UPDATE
       SET
@@ -145,7 +253,7 @@ const insertRows = async (rows) => {
       beneficiary_id, excel_id, species, quantity, cost, implementation_type, satisfaction, date_implemented
     ) VALUES (
       (SELECT id FROM upsert_beneficiary),
-      $1, $8, $9, $10, $11, $12, $13
+      $8, $9, $10, $11, $12, $13, $14
     )
     ON CONFLICT (excel_id) DO UPDATE
     SET
@@ -159,13 +267,14 @@ const insertRows = async (rows) => {
 
   for (const row of rows) {
     const values = [
-      row.excel_id,
+      row.beneficiary_excel_id,
       row.classification,
       row.name,
       row.gender,
       row.barangay,
       row.municipality,
       row.contact,
+      row.distribution_excel_id,
       row.species,
       row.quantity,
       row.cost,
@@ -177,12 +286,15 @@ const insertRows = async (rows) => {
   }
 }
 
+const cellIsDateHeader = (cell) =>
+  typeof cell === 'string' && cell.trim().toUpperCase() === 'DATE'
+
 const extractRows = (sheet) => {
   const matrix = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null })
-  const headerIndex = matrix.findIndex((row) => row[0] === 'DATE')
+  const headerIndex = matrix.findIndex((row) => row && cellIsDateHeader(row[0]))
   if (headerIndex === -1) return []
 
-  return matrix.slice(headerIndex + 1).filter((row) => row && row[1])
+  return matrix.slice(headerIndex + 1).filter((row) => row && (row[1] != null || row[2] != null))
 }
 
 const main = async () => {
@@ -190,6 +302,10 @@ const main = async () => {
 
   if (!fs.existsSync(filePath)) {
     console.error('File not found:', filePath)
+    process.exit(1)
+  }
+  if (!fs.statSync(filePath).isFile()) {
+    console.error('Not a file:', filePath)
     process.exit(1)
   }
 
@@ -209,7 +325,6 @@ const main = async () => {
       continue
     }
 
-    // Filter by year if specified
     if (year && !matchesYear(sheetName, year)) {
       console.log(`⚠️  Skipping sheet "${sheetName}" (year doesn't match ${year})`)
       skippedByYear++
@@ -218,7 +333,9 @@ const main = async () => {
 
     const sheet = workbook.Sheets[sheetName]
     const rows = extractRows(sheet)
-    const normalized = rows.map((row) => normalizeRow(row, sheetName)).filter(Boolean)
+    const normalized = rows
+      .map((row, idx) => normalizeRow(row, sheetName, idx))
+      .filter(Boolean)
 
     if (!normalized.length) {
       console.log(`⚠️  Sheet "${sheetName}" did not contain valid rows`)
@@ -242,5 +359,3 @@ main().catch((error) => {
   console.error('Import failed:', error)
   process.exit(1)
 })
-
-
