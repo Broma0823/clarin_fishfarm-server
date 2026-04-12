@@ -3,6 +3,21 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 const PAGE_SIZE = 80
 const SEARCH_DEBOUNCE_MS = 220
 
+export const MONTH_BUTTONS = [
+  { value: '1', label: 'Jan' },
+  { value: '2', label: 'Feb' },
+  { value: '3', label: 'Mar' },
+  { value: '4', label: 'Apr' },
+  { value: '5', label: 'May' },
+  { value: '6', label: 'Jun' },
+  { value: '7', label: 'Jul' },
+  { value: '8', label: 'Aug' },
+  { value: '9', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
+]
+
 function BeneficiaryRecordsPanelInner({
   records,
   loadingRecords,
@@ -55,7 +70,8 @@ function BeneficiaryRecordsPanelInner({
         record.name?.toLowerCase().includes(q) ||
         record.barangay?.toLowerCase().includes(q) ||
         record.municipality?.toLowerCase().includes(q) ||
-        record.species?.toLowerCase().includes(q)
+        record.species?.toLowerCase().includes(q) ||
+        String(record.contact ?? '').toLowerCase().includes(q)
     )
   }, [records, debouncedKeyword])
 
@@ -86,87 +102,148 @@ function BeneficiaryRecordsPanelInner({
     [onDeleteRecord]
   )
 
+  /** Always 2019 … current calendar year — not derived from filtered `records` (that would hide years). */
+  const endYear = new Date().getFullYear()
+  const yearButtonRange = []
+  for (let y = 2019; y <= endYear; y += 1) {
+    yearButtonRange.push(y)
+  }
+
+  const colCount = classification === 'group' ? 9 : 10
+
   return (
     <div className="database-table-view">
-      <div className="filter-section">
-        <div className="toggle">
-          <button
-            type="button"
-            className={classification === 'individual' ? 'toggle-btn active' : 'toggle-btn'}
-            onClick={() => onClassificationChange('individual')}
+      <div className="filter-section filter-section--records">
+        <div className="classification-switch-wrap">
+          <span className="classification-switch-label" id="classification-switch-label">
+            Record type
+          </span>
+          <div
+            className="classification-switch"
+            role="group"
+            aria-labelledby="classification-switch-label"
           >
-            Individuals
-          </button>
-          <button
-            type="button"
-            className={classification === 'group' ? 'toggle-btn active' : 'toggle-btn'}
-            onClick={() => onClassificationChange('group')}
-          >
-            Groups
-          </button>
+            <button
+              type="button"
+              className={
+                classification === 'individual'
+                  ? 'classification-switch__btn classification-switch__btn--active'
+                  : 'classification-switch__btn'
+              }
+              onClick={() => onClassificationChange('individual')}
+            >
+              Individuals
+            </button>
+            <button
+              type="button"
+              className={
+                classification === 'group'
+                  ? 'classification-switch__btn classification-switch__btn--active'
+                  : 'classification-switch__btn'
+              }
+              onClick={() => onClassificationChange('group')}
+            >
+              Groups
+            </button>
+          </div>
         </div>
-        <select
-          value={selectedYear}
-          onChange={(e) => onSelectedYearChange(e.target.value)}
-          className="filter-select"
-        >
-          <option value="">All Years</option>
-          <option value="2019">2019</option>
-          <option value="2020">2020</option>
-          <option value="2021">2021</option>
-          <option value="2022">2022</option>
-          <option value="2023">2023</option>
-          <option value="2024">2024</option>
-          <option value="2025">2025</option>
-        </select>
-        <select
-          value={selectedMonth}
-          onChange={(e) => onSelectedMonthChange(e.target.value)}
-          className="filter-select"
-        >
-          <option value="">All Months</option>
-          <option value="1">January</option>
-          <option value="2">February</option>
-          <option value="3">March</option>
-          <option value="4">April</option>
-          <option value="5">May</option>
-          <option value="6">June</option>
-          <option value="7">July</option>
-          <option value="8">August</option>
-          <option value="9">September</option>
-          <option value="10">October</option>
-          <option value="11">November</option>
-          <option value="12">December</option>
-        </select>
-        <input
-          type="search"
-          placeholder="Search name, barangay, or municipality"
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          className="search-input"
-        />
+        <div className="filter-section-filters">
+          <div className="year-filter-row">
+            <span className="year-filter-label" id="year-filter-label">
+              Year
+            </span>
+            <div
+              className="year-filter-buttons"
+              role="group"
+              aria-labelledby="year-filter-label"
+            >
+              <button
+                type="button"
+                className={
+                  selectedYear === '' || selectedYear === undefined
+                    ? 'year-filter-btn year-filter-btn--active'
+                    : 'year-filter-btn'
+                }
+                onClick={() => onSelectedYearChange('')}
+              >
+                All
+              </button>
+              {yearButtonRange.map((y) => (
+                <button
+                  key={y}
+                  type="button"
+                  className={
+                    String(selectedYear) === String(y)
+                      ? 'year-filter-btn year-filter-btn--active'
+                      : 'year-filter-btn'
+                  }
+                  onClick={() => onSelectedYearChange(String(y))}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="month-filter-row">
+            <span className="year-filter-label" id="month-filter-label">
+              Month
+            </span>
+            <div
+              className="year-filter-buttons month-filter-buttons"
+              role="group"
+              aria-labelledby="month-filter-label"
+            >
+              <button
+                type="button"
+                className={
+                  selectedMonth === '' || selectedMonth === undefined
+                    ? 'year-filter-btn year-filter-btn--active'
+                    : 'year-filter-btn'
+                }
+                onClick={() => onSelectedMonthChange('')}
+              >
+                All
+              </button>
+              {MONTH_BUTTONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    String(selectedMonth) === String(value)
+                      ? 'year-filter-btn year-filter-btn--active'
+                      : 'year-filter-btn'
+                  }
+                  onClick={() => onSelectedMonthChange(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <input
+            type="search"
+            placeholder={
+              classification === 'group'
+                ? 'Search organization, barangay, municipality, contact…'
+                : 'Search name, barangay, or municipality…'
+            }
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            className="search-input search-input--records"
+          />
+        </div>
       </div>
 
       {filteredRecords.length > PAGE_SIZE && (
-        <div
-          className="records-pagination"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '0.75rem',
-            marginBottom: '0.75rem',
-            fontSize: '0.9rem',
-            color: '#495057',
-          }}
-        >
+        <div className="records-pagination">
           <span>
             Showing {(page - 1) * PAGE_SIZE + 1}–
             {Math.min(page * PAGE_SIZE, filteredRecords.length)} of {filteredRecords.length}
             {debouncedKeyword ? ' (filtered)' : ''}
           </span>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="records-pagination__controls">
             <button
               type="button"
               className="view-toggle-btn"
@@ -190,12 +267,12 @@ function BeneficiaryRecordsPanelInner({
         </div>
       )}
 
-      <div className="table-wrapper">
-        <table className="data-table">
+      <div className="table-wrapper table-wrapper--records">
+        <table className="data-table data-table--records">
           <thead>
             <tr>
-              <th>Beneficiary</th>
-              <th>Gender</th>
+              <th>{classification === 'group' ? 'Organization' : 'Beneficiary'}</th>
+              {classification === 'individual' ? <th>Gender</th> : null}
               <th>Barangay</th>
               <th>Municipality</th>
               <th>Species</th>
@@ -209,15 +286,17 @@ function BeneficiaryRecordsPanelInner({
           <tbody>
             {loadingRecords ? (
               <tr>
-                <td colSpan={10} className="muted small">
+                <td colSpan={colCount} className="muted small">
                   Loading latest entries…
                 </td>
               </tr>
             ) : pagedRecords.length ? (
               pagedRecords.map((record, index) => (
                 <tr key={record.id ?? `${record.excel_id ?? 'row'}-${index}`}>
-                  <td>{record.name}</td>
-                  <td>{record.gender}</td>
+                  <td className="data-table__cell-name">{record.name}</td>
+                  {classification === 'individual' ? (
+                    <td>{record.gender && record.gender !== 'N/A' ? record.gender : record.gender || '—'}</td>
+                  ) : null}
                   <td>{record.barangay}</td>
                   <td>{record.municipality}</td>
                   <td>{formatSpecies(record.species)}</td>
@@ -312,7 +391,7 @@ function BeneficiaryRecordsPanelInner({
               ))
             ) : (
               <tr>
-                <td colSpan={10} className="muted small">
+                <td colSpan={colCount} className="muted small">
                   No records found for this filter.
                 </td>
               </tr>

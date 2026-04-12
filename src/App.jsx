@@ -1,15 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { AddRecordModal } from './components/AddRecordModal.jsx'
-import { BeneficiaryRecordsPanel } from './components/BeneficiaryRecordsPanel.jsx'
+import { BeneficiaryRecordsPanel, MONTH_BUTTONS } from './components/BeneficiaryRecordsPanel.jsx'
 import { MonitoringDashboardContent } from './components/MonitoringDashboard.jsx'
 import { CycleSummaryContent } from './components/CycleSummary.jsx'
 import { CyclesListContent } from './components/CyclesList.jsx'
 
-const defaultCredentials = {
-  email: 'bfar.bohol@da.gov.ph',
-  password: 'tilapia2025!',
-}
+/**
+ * Client-side login only (visible in the bundle). For stronger security, use server auth.
+ * `login` is either an email address or a short username shown in the first field.
+ */
+const ALLOWED_USERS = [
+  { login: 'bfar.bohol@da.gov.ph', password: 'tilapia2025!' },
+  { login: 'admin', password: 'password' },
+]
+
+const normalizeLogin = (value) => String(value ?? '').trim().toLowerCase()
+
+const findAllowedUser = (login, password) =>
+  ALLOWED_USERS.find(
+    (u) => normalizeLogin(u.login) === normalizeLogin(login) && u.password === password
+  )
+
+const resolveKnownLogin = (login) =>
+  ALLOWED_USERS.find((u) => normalizeLogin(u.login) === normalizeLogin(login))?.login ?? null
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api'
 
@@ -21,9 +35,10 @@ const readPersistedSession = () => {
     const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    const email = typeof parsed?.email === 'string' ? parsed.email.trim() : ''
-    if (email === defaultCredentials.email) {
-      return { email }
+    const stored = typeof parsed?.email === 'string' ? parsed.email.trim() : ''
+    const canonical = resolveKnownLogin(stored)
+    if (canonical) {
+      return { email: canonical }
     }
     window.localStorage.removeItem(SESSION_STORAGE_KEY)
   } catch {
@@ -89,7 +104,8 @@ function App() {
   const [credentials, setCredentials] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [user, setUser] = useState(() => readPersistedSession())
-  const [activePanel, setActivePanel] = useState(null)
+  const [postLoginFx, setPostLoginFx] = useState(false)
+  const [activePanel, setActivePanel] = useState('monitoring')
   const [classification, setClassification] = useState('individual')
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -118,7 +134,6 @@ function App() {
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [showDatabaseTable, setShowDatabaseTable] = useState(false)
   // Monitoring Dashboard State
   const [monitoringParameters, setMonitoringParameters] = useState([])
   const [loadingMonitoring, setLoadingMonitoring] = useState(false)
@@ -129,13 +144,13 @@ function App() {
   const [loadingWeather, setLoadingWeather] = useState(false)
   const [deviceReadings, setDeviceReadings] = useState(null) // Auto-collected water quality parameters
   const [loadingDeviceReadings, setLoadingDeviceReadings] = useState(false)
-  
+
   // Cycle Summary State
   const [showCycleSummary, setShowCycleSummary] = useState(false)
   const [showCyclesList, setShowCyclesList] = useState(false)
   const [selectedCycleForSummary, setSelectedCycleForSummary] = useState(null)
   const [cyclesListRefreshTrigger, setCyclesListRefreshTrigger] = useState(0)
-  
+
   const [newMonitoringRecord, setNewMonitoringRecord] = useState({
     cycleId: '',
     cycleStartDate: '',
@@ -150,20 +165,26 @@ function App() {
 
   const handleLogin = (event) => {
     event.preventDefault()
-    const isValid =
-      credentials.email.trim() === defaultCredentials.email &&
-      credentials.password === defaultCredentials.password
+    const match = findAllowedUser(credentials.email, credentials.password)
 
-    if (!isValid) {
+    if (!match) {
       setError('Incorrect access code. Contact BFAR admin for help.')
       return
     }
 
-    const sessionUser = { email: defaultCredentials.email }
+    const sessionUser = { email: match.login }
     setUser(sessionUser)
+    setPostLoginFx(true)
+    setActivePanel('monitoring')
     persistSession(sessionUser)
     setError('')
   }
+
+  useEffect(() => {
+    if (!postLoginFx) return
+    const t = setTimeout(() => setPostLoginFx(false), 1100)
+    return () => clearTimeout(t)
+  }, [postLoginFx])
 
   useEffect(() => {
     if (!user) return
@@ -219,7 +240,7 @@ function App() {
       if (productionRes.ok) {
         const productionPayload = await productionRes.json()
         const apiProduction = productionPayload.data ?? []
-        
+
         // Create a set of existing dates from API data (normalize to YYYY-MM format)
         const existingDates = new Set()
         apiProduction.forEach(entry => {
@@ -230,11 +251,11 @@ function App() {
             existingDates.add(`${year}-${month}`)
           }
         })
-        
+
         // Generate placeholder actual production data for 2024-2027
         // These will be used to compare with predicted values
         const placeholderActual = []
-        
+
         // Calculate base values from actual data pattern (2019-2023)
         // Analyze historical data to extract monthly patterns
         const sortedApiProduction = [...apiProduction].sort((a, b) => {
@@ -242,18 +263,18 @@ function App() {
           const dateB = new Date(b.month ?? b.snapshot_month)
           return dateA - dateB
         })
-        
+
         // Extract data from 2019-2023 only for pattern analysis
         const historicalData = sortedApiProduction.filter(entry => {
           const date = new Date(entry.month ?? entry.snapshot_month)
           const year = date.getFullYear()
           return year >= 2019 && year <= 2023
         })
-        
+
         // Calculate monthly averages from 2019-2023 to understand seasonal pattern
         const monthlyTotals = Array(12).fill(0)
         const monthlyCounts = Array(12).fill(0)
-        
+
         historicalData.forEach(entry => {
           const date = new Date(entry.month ?? entry.snapshot_month)
           const monthIndex = date.getMonth()
@@ -263,29 +284,29 @@ function App() {
             monthlyCounts[monthIndex] += 1
           }
         })
-        
+
         // Calculate average per month
-        const monthlyAverages = monthlyTotals.map((total, idx) => 
+        const monthlyAverages = monthlyTotals.map((total, idx) =>
           monthlyCounts[idx] > 0 ? total / monthlyCounts[idx] : 0
         )
-        
+
         // Calculate overall average from historical data
         const historicalValues = historicalData.map(e => e.fryCount ?? e.fry_count ?? 0).filter(v => v > 0)
-        const avgValue = historicalValues.length > 0 
-          ? historicalValues.reduce((sum, v) => sum + v, 0) / historicalValues.length 
+        const avgValue = historicalValues.length > 0
+          ? historicalValues.reduce((sum, v) => sum + v, 0) / historicalValues.length
           : 80000 // Fallback average
-        
+
         // Calculate seasonal factors based on actual monthly averages
         // Normalize monthly averages to create seasonal pattern
-        const seasonalFactors = monthlyAverages.map(avg => 
+        const seasonalFactors = monthlyAverages.map(avg =>
           avg > 0 ? avg / avgValue : 1.0
         )
-        
+
         // If no historical data, use fallback pattern
         if (historicalValues.length === 0) {
           seasonalFactors.splice(0, seasonalFactors.length, ...[0.95, 0.97, 1.0, 1.05, 1.08, 1.06, 1.04, 1.02, 1.0, 0.98, 0.96, 0.94])
         }
-        
+
         // Add placeholder for 2024 (actual only, no forecast)
         // Always add all 12 months of 2024 as placeholder values
         for (let month = 0; month < 12; month++) {
@@ -300,7 +321,7 @@ function App() {
             fry_count: value,
           })
         }
-        
+
         // Add placeholder for 2025-2027
         for (let year = 2025; year <= 2027; year++) {
           for (let month = 0; month < 12; month++) {
@@ -319,23 +340,23 @@ function App() {
             }
           }
         }
-        
+
         // Combine API data with placeholder actual data
         // Use a Map to ensure API data takes precedence over placeholders
         const productionMap = new Map()
-        
+
         // First add placeholders (ensures all 2024 months are present)
         placeholderActual.forEach(entry => {
           const dateKey = entry.month ?? entry.snapshot_month
           productionMap.set(dateKey, entry)
         })
-        
+
         // Then add API data (will overwrite placeholders if they exist)
         apiProduction.forEach(entry => {
           const dateKey = entry.month ?? entry.snapshot_month
           productionMap.set(dateKey, entry)
         })
-        
+
         // Convert back to array and sort
         setProduction(Array.from(productionMap.values()).sort((a, b) => {
           const dateA = new Date(a.month ?? a.snapshot_month)
@@ -347,22 +368,22 @@ function App() {
         const placeholderActual = []
         // Use fallbackProduction to calculate pattern
         const fallbackValues = fallbackProduction.map(e => e.fryCount)
-        const avgValue = fallbackValues.length > 0 
-          ? fallbackValues.reduce((sum, v) => sum + v, 0) / fallbackValues.length 
+        const avgValue = fallbackValues.length > 0
+          ? fallbackValues.reduce((sum, v) => sum + v, 0) / fallbackValues.length
           : 80000
-        
+
         // Calculate seasonal factors from fallback data
         // Fallback data: Jan: 65000, Feb: 69000, Mar: 71200, Apr: 77000, May: 80500, Jun: 79000
         const fallbackFactors = [
-          65000/avgValue, 69000/avgValue, 71200/avgValue, 77000/avgValue, 
-          80500/avgValue, 79000/avgValue, 
+          65000 / avgValue, 69000 / avgValue, 71200 / avgValue, 77000 / avgValue,
+          80500 / avgValue, 79000 / avgValue,
           // Extrapolate for remaining months based on pattern
           0.98, 0.96, 0.94, 0.92, 0.90
         ]
-        const seasonalFactors = fallbackFactors.length === 12 
-          ? fallbackFactors 
+        const seasonalFactors = fallbackFactors.length === 12
+          ? fallbackFactors
           : [0.95, 0.97, 1.0, 1.05, 1.08, 1.06, 1.04, 1.02, 1.0, 0.98, 0.96, 0.94]
-        
+
         // Add placeholder for 2024 (actual only)
         // Always add all 12 months of 2024 as placeholder values
         for (let month = 0; month < 12; month++) {
@@ -375,7 +396,7 @@ function App() {
             fry_count: value,
           })
         }
-        
+
         // Add placeholder for 2025-2027
         for (let year = 2025; year <= 2027; year++) {
           for (let month = 0; month < 12; month++) {
@@ -418,7 +439,7 @@ function App() {
     }
   }, [user])
 
-  const summaryStats = useMemo(() => {
+  const baseSummaryStats = useMemo(() => {
     if (summary) {
       return {
         totalBeneficiaries: Number(summary.total_beneficiaries ?? 0),
@@ -442,14 +463,20 @@ function App() {
     }
   }, [summary, records])
 
-  const filteredYearlyBreakdown = useMemo(() => {
+  /** Full yearly rows for Summary — do not filter by `selectedYear` (that hid other years in the table). */
+  const fullYearlyBreakdown = useMemo(() => {
     if (!breakdown || !breakdown.yearly) return []
-    let filtered = breakdown.yearly
-    if (selectedYear) {
-      filtered = filtered.filter((year) => year.year.toString() === selectedYear)
+    return breakdown.yearly
+  }, [breakdown])
+
+  const summaryYearButtonRange = useMemo(() => {
+    const endY = new Date().getFullYear()
+    const years = []
+    for (let y = 2019; y <= endY; y += 1) {
+      years.push(y)
     }
-    return filtered
-  }, [breakdown, selectedYear])
+    return years
+  }, [])
 
   const filteredMonthlyBreakdown = useMemo(() => {
     if (!breakdown || !breakdown.monthly) return []
@@ -463,16 +490,64 @@ function App() {
     return filtered
   }, [breakdown, selectedYear, selectedMonth])
 
+  const selectedYearBreakdown = useMemo(() => {
+    if (!selectedYear) return null
+    return (
+      fullYearlyBreakdown.find((year) => String(year.year) === String(selectedYear)) ?? {
+        year: Number(selectedYear),
+        beneficiaryCount: 0,
+        totalQuantity: 0,
+        totalCost: 0,
+      }
+    )
+  }, [fullYearlyBreakdown, selectedYear])
+
+  const scopedSummaryStats = useMemo(() => {
+    if (selectedMonth) {
+      const monthlyTotals = filteredMonthlyBreakdown.reduce(
+        (acc, month) => {
+          acc.totalBeneficiaries += Number(month.beneficiaryCount ?? 0)
+          acc.quantity += Number(month.totalQuantity ?? 0)
+          acc.cost += Number(month.totalCost ?? 0)
+          return acc
+        },
+        { totalBeneficiaries: 0, quantity: 0, cost: 0 }
+      )
+      return monthlyTotals
+    }
+
+    if (selectedYearBreakdown) {
+      return {
+        totalBeneficiaries: Number(selectedYearBreakdown.beneficiaryCount ?? 0),
+        quantity: Number(selectedYearBreakdown.totalQuantity ?? 0),
+        cost: Number(selectedYearBreakdown.totalCost ?? 0),
+      }
+    }
+
+    return baseSummaryStats
+  }, [baseSummaryStats, filteredMonthlyBreakdown, selectedMonth, selectedYearBreakdown])
+
+  const selectedMonthLabel = useMemo(() => {
+    if (!selectedMonth) return null
+    return MONTH_BUTTONS.find((month) => String(month.value) === String(selectedMonth))?.label ?? selectedMonth
+  }, [selectedMonth])
+
+  const hasSummaryFilters = Boolean(selectedYear || selectedMonth)
+  const summaryScopeLabel = selectedMonth
+    ? `${selectedMonthLabel}${selectedYear ? ` ${selectedYear}` : ''}`
+    : selectedYear || 'All years'
+  const summaryScopeDescription = `Scope: ${summaryScopeLabel}`
+
   // Fetch monitoring parameters
   useEffect(() => {
     if (!user || activePanel !== 'monitoring') return
-    
+
     const fetchMonitoringParameters = async () => {
       setLoadingMonitoring(true)
       try {
         const params = new URLSearchParams()
         if (currentCycleId) params.append('cycleId', currentCycleId)
-        
+
         const response = await fetch(`${API_BASE_URL}/monitoring?${params.toString()}`)
         const payload = await response.json()
         if (response.ok) {
@@ -485,14 +560,14 @@ function App() {
         setLoadingMonitoring(false)
       }
     }
-    
+
     fetchMonitoringParameters()
   }, [user, activePanel, currentCycleId])
 
   // Fetch weather data
   useEffect(() => {
     if (!user || activePanel !== 'monitoring') return
-    
+
     const fetchWeather = async () => {
       setLoadingWeather(true)
       try {
@@ -503,7 +578,7 @@ function App() {
         // Clarin, Bohol coordinates approximately: 9.95°N, 123.95°E
         const lat = 9.95
         const lon = 123.95
-        
+
         if (API_KEY) {
           const response = await fetch(
             `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
@@ -539,7 +614,7 @@ function App() {
         setLoadingWeather(false)
       }
     }
-    
+
     fetchWeather()
     // Refresh weather every 10 minutes
     const interval = setInterval(fetchWeather, 600000)
@@ -549,7 +624,7 @@ function App() {
   // Fetch water quality parameters from monitoring device
   useEffect(() => {
     if (!user || activePanel !== 'monitoring') return
-    
+
     const fetchDeviceReadings = async () => {
       setLoadingDeviceReadings(true)
       try {
@@ -579,7 +654,7 @@ function App() {
         setLoadingDeviceReadings(false)
       }
     }
-    
+
     fetchDeviceReadings()
     // Refresh device readings every 30 seconds (typical for monitoring devices)
     const interval = setInterval(fetchDeviceReadings, 30000)
@@ -637,7 +712,7 @@ function App() {
         notes: '',
       })
       setToast('Monitoring record added successfully')
-      
+
       // Refresh monitoring parameters
       const refreshResponse = await fetch(`${API_BASE_URL}/monitoring`)
       if (refreshResponse.ok) {
@@ -677,7 +752,7 @@ function App() {
   const handleUpdateMonitoringRecord = async (event) => {
     event.preventDefault()
     if (!editingMonitoring) return
-    
+
     setIsSubmitting(true)
     try {
       // Keep existing auto-collected values, only update user-inputted fields
@@ -722,7 +797,7 @@ function App() {
         notes: '',
       })
       setToast('Monitoring record updated successfully')
-      
+
       // Refresh monitoring parameters
       const refreshResponse = await fetch(`${API_BASE_URL}/monitoring`)
       if (refreshResponse.ok) {
@@ -741,7 +816,7 @@ function App() {
 
   const handleDeleteMonitoringRecord = async (id) => {
     if (!confirm('Are you sure you want to delete this monitoring record?')) return
-    
+
     try {
       const response = await fetch(`${API_BASE_URL}/monitoring/${id}`, {
         method: 'DELETE',
@@ -765,8 +840,7 @@ function App() {
   const handleLogout = () => {
     clearPersistedSession()
     setUser(null)
-    setActivePanel(null)
-    setShowDatabaseTable(false)
+    setActivePanel('monitoring')
     setToast('')
     setSelectedYear('')
     setSelectedMonth('')
@@ -877,7 +951,7 @@ function App() {
       setShowEditModal(false)
       setEditingRecord(null)
       setToast('Record updated successfully!')
-      
+
       // Refresh records
       const params = new URLSearchParams({ classification })
       if (selectedYear) params.append('year', selectedYear)
@@ -887,7 +961,7 @@ function App() {
         const refreshPayload = await refreshResponse.json()
         setRecords(refreshPayload.data ?? [])
       }
-      
+
       // Refresh summary
       void bootstrapSummary()
     } catch (err) {
@@ -912,9 +986,9 @@ function App() {
                 </svg>
               </div>
               <h1>Clarin Freshwater Fish Farm</h1>
-              <p className="subtitle">Database Management & Forecasting System</p>
+              <p className="subtitle">Database Management & Monitoring System</p>
             </div>
-            
+
             <div className="welcome-content">
               <div className="feature-item">
                 <div className="feature-icon">
@@ -929,20 +1003,22 @@ function App() {
                   <p>Manage beneficiary records, track distributions, and maintain detailed information about freshwater fish farm operations across municipalities.</p>
                 </div>
               </div>
-              
+
               <div className="feature-item">
                 <div className="feature-icon">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
                   </svg>
                 </div>
                 <div>
-                  <h3>Production Forecasting</h3>
-                  <p>Analyze historical data and generate accurate forecasts for quarterly, monthly, and annual tilapia fry production to support planning and allocation.</p>
+                  <h3>Operations Monitoring</h3>
+                  <p>Track water quality readings, breeding cycles, feed allocation, and pond-side observations so field teams can respond quickly and keep production records aligned with actual farm conditions.</p>
                 </div>
               </div>
             </div>
-            
+
             <div className="welcome-footer">
               <p className="muted small">
                 <strong>Bureau of Fisheries and Aquatic Resources</strong><br />
@@ -952,10 +1028,12 @@ function App() {
           </div>
           <form className="login-form" onSubmit={handleLogin}>
             <label className="field">
-              <span>email</span>
+              <span>Email or username</span>
               <input
-                type="email"
-                placeholder="Enter your email"
+                type="text"
+                name="login"
+                autoComplete="username"
+                placeholder="e.g. bfar.bohol@da.gov.ph or admin"
                 value={credentials.email}
                 onChange={(event) =>
                   setCredentials((prev) => ({
@@ -967,7 +1045,7 @@ function App() {
               />
             </label>
             <label className="field">
-              <span>password</span>
+              <span>Password</span>
               <input
                 type="password"
                 placeholder="Enter your password"
@@ -983,7 +1061,7 @@ function App() {
             </label>
             {error && <p className="error">{error}</p>}
             <button type="submit" className="login-button">
-              login
+              Login
             </button>
           </form>
         </div>
@@ -991,253 +1069,316 @@ function App() {
     )
   }
 
-  if (user && !activePanel) {
-    return (
-      <div className="screen selection-screen">
-        <div className="selection-container">
-          <div className="selection-header">
-            <h1>Clarin Freshwater Fish Farm Database and Data Collection</h1>
-            <p className="muted">Welcome back! Select an option to proceed.</p>
-          </div>
-
-          <div className="home-actions">
-            <button
-              className="home-action-button database-button"
-              onClick={() => setActivePanel('database')}
-            >
-              <div className="button-icon-container">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                  <line x1="9" y1="3" x2="9" y2="21"></line>
-                  <line x1="3" y1="9" x2="21" y2="9"></line>
-                  <rect x="4" y="10" width="4" height="8" fill="currentColor" opacity="0.3"></rect>
-                  <rect x="10" y="6" width="4" height="12" fill="currentColor" opacity="0.5"></rect>
-                  <rect x="16" y="4" width="4" height="14" fill="currentColor" opacity="0.7"></rect>
-                </svg>
-              </div>
-              <h2>Summary and Reports</h2>
-              <p className="muted small">
-                View and manage beneficiary records, summary statistics, and reports
-              </p>
-            </button>
-
-            <button
-              className="home-action-button statistics-button"
-              onClick={() => setActivePanel('monitoring')}
-            >
-              <div className="button-icon-container">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                  <circle cx="8" cy="8" r="1"></circle>
-                  <circle cx="16" cy="8" r="1"></circle>
-                  <line x1="8" y1="12" x2="16" y2="12"></line>
-                  <line x1="8" y1="16" x2="16" y2="16"></line>
-                </svg>
-              </div>
-              <h2>Proceed to Monitoring Dashboard</h2>
-              <p className="muted small">
-                Monitor water quality parameters, weather conditions, and breeding cycle data
-              </p>
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="screen dashboard-screen">
+    <div className={`screen dashboard-screen${postLoginFx ? ' dashboard-screen--enter' : ''}`}>
       <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
-        <button className="sidebar-toggle" onClick={() => setActivePanel(null)} title="Go to Homepage">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-        </button>
-        <nav className="menu">
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <div className="sidebar-brand__icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                <path d="M2 17l10 5 10-5"></path>
+                <path d="M2 12l10 5 10-5"></path>
+              </svg>
+            </div>
+            <div className="sidebar-brand__text">
+              <span className="sidebar-brand__title">Clarin Fish Farm</span>
+              <span className="sidebar-brand__sub">BFAR Bohol</span>
+            </div>
+          </div>
           <button
-            className={activePanel === 'database' ? 'menu-item active' : 'menu-item'}
-            onClick={() => setActivePanel('database')}
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => {
+              setActivePanel('monitoring')
+              setShowCycleSummary(false)
+              setShowCyclesList(false)
+            }}
+            title="Go to monitoring"
           >
-            Summary and Reports
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
           </button>
+        </div>
+
+        <p className="sidebar-nav-label">Navigation</p>
+        <nav className="menu" aria-label="Main navigation">
           <button
+            type="button"
             className={activePanel === 'monitoring' ? 'menu-item active' : 'menu-item'}
             onClick={() => setActivePanel('monitoring')}
+            title="Monitoring Dashboard"
           >
-            Monitoring Dashboard
+            <span className="menu-item__icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </span>
+            <span className="menu-item__label">Monitoring</span>
+          </button>
+          <button
+            type="button"
+            className={activePanel === 'summary' ? 'menu-item active' : 'menu-item'}
+            onClick={() => setActivePanel('summary')}
+          >
+            <span className="menu-item__icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="9"></rect>
+                <rect x="14" y="3" width="7" height="5"></rect>
+                <rect x="14" y="12" width="7" height="9"></rect>
+                <rect x="3" y="16" width="7" height="5"></rect>
+              </svg>
+            </span>
+            <span className="menu-item__label">Summary</span>
+          </button>
+          <button
+            type="button"
+            className={activePanel === 'records' ? 'menu-item active' : 'menu-item'}
+            onClick={() => setActivePanel('records')}
+          >
+            <span className="menu-item__icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </span>
+            <span className="menu-item__label">Records</span>
           </button>
         </nav>
+
         <div className="sidebar-footer">
-          <button className="logout-button" onClick={handleLogout}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <polyline points="16 17 21 12 16 7"></polyline>
-              <line x1="21" y1="12" x2="9" y2="12"></line>
-            </svg>
-            Logout
+          <button type="button" className="logout-button" onClick={handleLogout}>
+            <span className="logout-button__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </span>
+            <span>Log out</span>
           </button>
         </div>
       </aside>
 
       <main className="main-area">
-        {activePanel === 'database' && (
+        {activePanel === 'summary' && (
           <section className="panel">
             <header className="panel-header">
-              <h2>{showDatabaseTable ? 'Records' : 'Summary'}</h2>
-              <div className="panel-actions">
-                {showDatabaseTable && (
-                  <button
-                    className="add-record-button"
-                    onClick={() => setShowAddModal(true)}
-                  >
-                    + Add Record
-                  </button>
+              <h2>Summary</h2>
+            </header>
+
+            {toast && <p className={`toast ${toast.includes('Error') ? 'error-toast' : 'success-toast'}`}>{toast}</p>}
+
+            <div className="database-summary">
+              <div className="filter-section filter-section--records filter-section--summary" style={{ marginBottom: '2rem' }}>
+                <div className="summary-filter-header">
+                  <p className="summary-filter-subtitle">{summaryScopeDescription}</p>
+                  {hasSummaryFilters && (
+                    <button
+                      type="button"
+                      className="summary-filter-reset-btn"
+                      onClick={() => {
+                        setSelectedYear('')
+                        setSelectedMonth('')
+                      }}
+                    >
+                      Reset filters
+                    </button>
+                  )}
+                </div>
+                <div className="filter-section-filters">
+                  <div className="year-filter-row">
+                    <span className="year-filter-label" id="summary-year-filter-label">
+                      Year
+                    </span>
+                    <div
+                      className="year-filter-buttons"
+                      role="group"
+                      aria-labelledby="summary-year-filter-label"
+                    >
+                      <button
+                        type="button"
+                        className={
+                          selectedYear === '' || selectedYear === undefined
+                            ? 'year-filter-btn year-filter-btn--active'
+                            : 'year-filter-btn'
+                        }
+                        onClick={() => setSelectedYear('')}
+                      >
+                        All
+                      </button>
+                      {summaryYearButtonRange.map((y) => (
+                        <button
+                          key={y}
+                          type="button"
+                          className={
+                            String(selectedYear) === String(y)
+                              ? 'year-filter-btn year-filter-btn--active'
+                              : 'year-filter-btn'
+                          }
+                          onClick={() => setSelectedYear(String(y))}
+                        >
+                          {y}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="month-filter-row">
+                    <span className="year-filter-label" id="summary-month-filter-label">
+                      Month
+                    </span>
+                    <div
+                      className="year-filter-buttons month-filter-buttons"
+                      role="group"
+                      aria-labelledby="summary-month-filter-label"
+                    >
+                      <button
+                        type="button"
+                        className={
+                          selectedMonth === '' || selectedMonth === undefined
+                            ? 'year-filter-btn year-filter-btn--active'
+                            : 'year-filter-btn'
+                        }
+                        onClick={() => setSelectedMonth('')}
+                      >
+                        All
+                      </button>
+                      {MONTH_BUTTONS.map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={
+                            String(selectedMonth) === String(value)
+                              ? 'year-filter-btn year-filter-btn--active'
+                              : 'year-filter-btn'
+                          }
+                          onClick={() => setSelectedMonth(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="stats-grid">
+                <article className={`stat-card ${hasSummaryFilters ? 'stat-card--scoped' : ''}`}>
+                  <p className="muted small">Beneficiaries</p>
+                  <h3>{formatNumber(scopedSummaryStats.totalBeneficiaries)}</h3>
+                </article>
+                <article className={`stat-card ${hasSummaryFilters ? 'stat-card--scoped' : ''}`}>
+                  <p className="muted small">Distribution</p>
+                  <h3>{formatNumber(scopedSummaryStats.quantity)} pcs</h3>
+                </article>
+                <article className={`stat-card ${hasSummaryFilters ? 'stat-card--scoped' : ''}`}>
+                  <p className="muted small">Cost</p>
+                  <h3>{formatCurrency(scopedSummaryStats.cost)}</h3>
+                </article>
+              </div>
+
+              {breakdown && fullYearlyBreakdown.length > 0 && (
+                <div className="chart-card">
+                  <h3>Yearly Summary</h3>
+                  <div className="breakdown-table">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Year</th>
+                          <th>Beneficiaries</th>
+                          <th>Fry Distributed (pcs)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fullYearlyBreakdown.map((year) => (
+                          <tr
+                            key={year.year}
+                            className={
+                              selectedYear && String(year.year) === String(selectedYear)
+                                ? 'data-table__row--year-highlight'
+                                : undefined
+                            }
+                          >
+                            <td><strong>{year.year}</strong></td>
+                            <td>{formatNumber(year.beneficiaryCount)}</td>
+                            <td>{formatNumber(year.totalQuantity)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="chart-card">
+                <h3>{selectedYear || selectedMonth ? 'Monthly Activity' : 'Recent Activity (Last 12 Months)'}</h3>
+                {breakdown && filteredMonthlyBreakdown.length > 0 ? (
+                  <div className="breakdown-table">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Year</th>
+                          <th>Month</th>
+                          <th>Beneficiaries</th>
+                          <th>Fry Distributed (pcs)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedYear || selectedMonth ? filteredMonthlyBreakdown : filteredMonthlyBreakdown.slice(-12)).map((month, index) => (
+                          <tr key={`${month.year}-${month.month}-${index}`}>
+                            <td>{month.year}</td>
+                            <td>
+                              {new Date(2000, month.month - 1).toLocaleDateString('en-PH', {
+                                month: 'long',
+                              })}
+                            </td>
+                            <td>{formatNumber(month.beneficiaryCount)}</td>
+                            <td>{formatNumber(month.totalQuantity)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted small">No monthly data available</p>
                 )}
-                <button
-                  className={showDatabaseTable ? 'view-toggle-btn active' : 'view-toggle-btn'}
-                  onClick={() => setShowDatabaseTable(!showDatabaseTable)}
-                >
-                  {showDatabaseTable ? '📊 Show Summary' : '📋 View Beneficiary Records'}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activePanel === 'records' && (
+          <section className="panel">
+            <header className="panel-header">
+              <h2>Records</h2>
+              <div className="panel-actions">
+                <button className="add-record-button" onClick={() => setShowAddModal(true)}>
+                  + Add Record
                 </button>
               </div>
             </header>
 
             {toast && <p className={`toast ${toast.includes('Error') ? 'error-toast' : 'success-toast'}`}>{toast}</p>}
 
-            {!showDatabaseTable ? (
-              <div className="database-summary">
-                <div className="filter-section" style={{ marginBottom: '2rem' }}>
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="filter-select"
-                  >
-                    <option value="">All Years</option>
-                    <option value="2019">2019</option>
-                    <option value="2020">2020</option>
-                    <option value="2021">2021</option>
-                    <option value="2022">2022</option>
-                    <option value="2023">2023</option>
-                    <option value="2024">2024</option>
-                    <option value="2025">2025</option>
-                  </select>
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="filter-select"
-                  >
-                    <option value="">All Months</option>
-                    <option value="1">January</option>
-                    <option value="2">February</option>
-                    <option value="3">March</option>
-                    <option value="4">April</option>
-                    <option value="5">May</option>
-                    <option value="6">June</option>
-                    <option value="7">July</option>
-                    <option value="8">August</option>
-                    <option value="9">September</option>
-                    <option value="10">October</option>
-                    <option value="11">November</option>
-                    <option value="12">December</option>
-                  </select>
-                </div>
-                <div className="stats-grid">
-                  <article className="stat-card">
-                    <p className="muted small">Total Beneficiaries</p>
-                    <h3>{formatNumber(summaryStats.totalBeneficiaries)}</h3>
-                    <p className="muted small">Registered individuals and groups</p>
-                  </article>
-                  <article className="stat-card">
-                    <p className="muted small">Total Quantity Distributed</p>
-                    <h3>{formatNumber(summaryStats.quantity)} pcs</h3>
-                    <p className="muted small">Tilapia fry distributed</p>
-                  </article>
-                  <article className="stat-card">
-                    <p className="muted small">Total Cost</p>
-                    <h3>{formatCurrency(summaryStats.cost)}</h3>
-                    <p className="muted small">Total implementation cost</p>
-                  </article>
-                </div>
-
-                {breakdown && filteredYearlyBreakdown.length > 0 && (
-                  <div className="chart-card">
-                    <h3>Yearly Summary</h3>
-                    <div className="breakdown-table">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>Year</th>
-                            <th>Beneficiaries</th>
-                            <th>Fry Distributed (pcs)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredYearlyBreakdown.map((year) => (
-                            <tr key={year.year}>
-                              <td><strong>{year.year}</strong></td>
-                              <td>{formatNumber(year.beneficiaryCount)}</td>
-                              <td>{formatNumber(year.totalQuantity)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                <div className="chart-card">
-                  <h3>{selectedYear || selectedMonth ? 'Monthly Activity' : 'Recent Activity (Last 12 Months)'}</h3>
-                  {breakdown && filteredMonthlyBreakdown.length > 0 ? (
-                    <div className="breakdown-table">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>Year</th>
-                            <th>Month</th>
-                            <th>Beneficiaries</th>
-                            <th>Fry Distributed (pcs)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(selectedYear || selectedMonth ? filteredMonthlyBreakdown : filteredMonthlyBreakdown.slice(-12)).map((month, index) => (
-                            <tr key={`${month.year}-${month.month}-${index}`}>
-                              <td>{month.year}</td>
-                              <td>
-                                {new Date(2000, month.month - 1).toLocaleDateString('en-PH', {
-                                  month: 'long',
-                                })}
-                              </td>
-                              <td>{formatNumber(month.beneficiaryCount)}</td>
-                              <td>{formatNumber(month.totalQuantity)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="muted small">No monthly data available</p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <BeneficiaryRecordsPanel
-                records={records}
-                loadingRecords={loadingRecords}
-                classification={classification}
-                onClassificationChange={setClassification}
-                selectedYear={selectedYear}
-                onSelectedYearChange={setSelectedYear}
-                selectedMonth={selectedMonth}
-                onSelectedMonthChange={setSelectedMonth}
-                onEditRecord={handleEditRecord}
-                onDeleteRecord={handleDeleteRecord}
-                formatNumber={formatNumber}
-                formatDate={formatDate}
-                formatSpecies={formatSpecies}
-              />
-            )}
+            <BeneficiaryRecordsPanel
+              records={records}
+              loadingRecords={loadingRecords}
+              classification={classification}
+              onClassificationChange={setClassification}
+              selectedYear={selectedYear}
+              onSelectedYearChange={setSelectedYear}
+              selectedMonth={selectedMonth}
+              onSelectedMonthChange={setSelectedMonth}
+              onEditRecord={handleEditRecord}
+              onDeleteRecord={handleDeleteRecord}
+              formatNumber={formatNumber}
+              formatDate={formatDate}
+              formatSpecies={formatSpecies}
+            />
           </section>
         )}
 
@@ -1350,9 +1491,9 @@ function App() {
                 <div className="chart-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                     <h3 style={{ margin: 0 }}>Quarterly Production Statistics</h3>
-                    <div style={{ 
-                      display: 'flex', 
-                      gap: '2.5rem', 
+                    <div style={{
+                      display: 'flex',
+                      gap: '2.5rem',
                       padding: '1.25rem 2rem',
                       backgroundColor: '#f8f9fa',
                       borderRadius: '8px',
@@ -1379,12 +1520,12 @@ function App() {
                         const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
                         const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
                         const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
-                        
+
                         return (
-                          <div style={{ 
-                            display: 'grid', 
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                            gap: '1rem', 
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                            gap: '1rem',
                             marginBottom: '1.5rem',
                             padding: '0.875rem',
                             backgroundColor: '#f8f9fa',
@@ -1531,11 +1672,11 @@ function App() {
                                       {/* Actual data points */}
                                       {actualPoints.map((point, i) => (
                                         <g key={`actual-${i}`}>
-                                          <circle 
-                                            cx={point.x} 
-                                            cy={point.y} 
-                                            r="4" 
-                                            fill="#1A3D64" 
+                                          <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r="4"
+                                            fill="#1A3D64"
                                           />
                                           <text
                                             x={point.x}
@@ -1552,11 +1693,11 @@ function App() {
                                       {/* Predicted data points */}
                                       {predictedPoints.map((point, i) => (
                                         <g key={`predicted-${i}`}>
-                                          <circle 
-                                            cx={point.x} 
-                                            cy={point.y} 
-                                            r="4" 
-                                            fill="#4CAF50" 
+                                          <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r="4"
+                                            fill="#4CAF50"
                                           />
                                           <text
                                             x={point.x}
@@ -1601,7 +1742,7 @@ function App() {
                         <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
                           Detailed Breakdown
                         </h4>
-                        <div style={{ 
+                        <div style={{
                           borderTop: '2px solid #e9ecef',
                           paddingTop: '0.75rem',
                           maxHeight: '400px',
@@ -1621,9 +1762,9 @@ function App() {
                                 // Create a unique key that includes both actual and predicted to prevent duplicates
                                 const uniqueKey = `${quarter.label}-${quarter.actual || 'null'}-${quarter.predicted || 'null'}`
                                 return (
-                                  <tr 
+                                  <tr
                                     key={uniqueKey}
-                                    style={{ 
+                                    style={{
                                       borderBottom: '1px solid #e9ecef',
                                       backgroundColor: 'transparent'
                                     }}
@@ -1657,9 +1798,9 @@ function App() {
                 <div className="chart-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                     <h3 style={{ margin: 0 }}>Monthly Production Statistics</h3>
-                    <div style={{ 
-                      display: 'flex', 
-                      gap: '2.5rem', 
+                    <div style={{
+                      display: 'flex',
+                      gap: '2.5rem',
                       padding: '1.25rem 2rem',
                       backgroundColor: '#f8f9fa',
                       borderRadius: '8px',
@@ -1686,12 +1827,12 @@ function App() {
                         const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
                         const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
                         const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
-                        
+
                         return (
-                          <div style={{ 
-                            display: 'grid', 
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                            gap: '1rem', 
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                            gap: '1rem',
                             marginBottom: '1.5rem',
                             padding: '0.875rem',
                             backgroundColor: '#f8f9fa',
@@ -1897,7 +2038,7 @@ function App() {
                         <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
                           Detailed Breakdown
                         </h4>
-                        <div style={{ 
+                        <div style={{
                           borderTop: '2px solid #e9ecef',
                           paddingTop: '0.75rem',
                           maxHeight: '400px',
@@ -1916,9 +2057,9 @@ function App() {
                                 const hasBoth = entry.actual !== null && entry.predicted !== null
                                 const uniqueKey = `${entry.month}-${entry.actual || 'null'}-${entry.predicted || 'null'}`
                                 return (
-                                  <tr 
+                                  <tr
                                     key={uniqueKey}
-                                    style={{ 
+                                    style={{
                                       borderBottom: '1px solid #e9ecef',
                                       backgroundColor: 'transparent'
                                     }}
@@ -1952,9 +2093,9 @@ function App() {
                 <div className="chart-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                     <h3 style={{ margin: 0 }}>Annual Production Statistics</h3>
-                    <div style={{ 
-                      display: 'flex', 
-                      gap: '2.5rem', 
+                    <div style={{
+                      display: 'flex',
+                      gap: '2.5rem',
                       padding: '1.25rem 2rem',
                       backgroundColor: '#f8f9fa',
                       borderRadius: '8px',
@@ -1981,12 +2122,12 @@ function App() {
                         const avgActual = actualData.length > 0 ? totalActual / actualData.length : 0
                         const avgPredicted = predictedData.length > 0 ? totalPredicted / predictedData.length : 0
                         const growthRate = avgActual > 0 ? ((avgPredicted - avgActual) / avgActual * 100).toFixed(1) : 0
-                        
+
                         return (
-                          <div style={{ 
-                            display: 'grid', 
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                            gap: '1rem', 
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                            gap: '1rem',
                             marginBottom: '1.5rem',
                             padding: '0.875rem',
                             backgroundColor: '#f8f9fa',
@@ -2128,11 +2269,11 @@ function App() {
                                       {/* Actual data points */}
                                       {actualPoints.map((point, i) => (
                                         <g key={`actual-${i}`}>
-                                          <circle 
-                                            cx={point.x} 
-                                            cy={point.y} 
-                                            r="4" 
-                                            fill="#1A3D64" 
+                                          <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r="4"
+                                            fill="#1A3D64"
                                           />
                                           <text
                                             x={point.x}
@@ -2149,11 +2290,11 @@ function App() {
                                       {/* Predicted data points */}
                                       {predictedPoints.map((point, i) => (
                                         <g key={`predicted-${i}`}>
-                                          <circle 
-                                            cx={point.x} 
-                                            cy={point.y} 
-                                            r="4" 
-                                            fill="#4CAF50" 
+                                          <circle
+                                            cx={point.x}
+                                            cy={point.y}
+                                            r="4"
+                                            fill="#4CAF50"
                                           />
                                           <text
                                             x={point.x}
@@ -2198,7 +2339,7 @@ function App() {
                         <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '1.2rem', fontWeight: '600', color: '#495057' }}>
                           Detailed Breakdown
                         </h4>
-                        <div style={{ 
+                        <div style={{
                           borderTop: '2px solid #e9ecef',
                           paddingTop: '0.75rem',
                           maxHeight: '400px',
@@ -2217,9 +2358,9 @@ function App() {
                                 const hasBoth = year.actual !== null && year.predicted !== null
                                 const uniqueKey = `${year.label}-${year.actual || 'null'}-${year.predicted || 'null'}`
                                 return (
-                                  <tr 
+                                  <tr
                                     key={uniqueKey}
-                                    style={{ 
+                                    style={{
                                       borderBottom: '1px solid #e9ecef',
                                       backgroundColor: 'transparent'
                                     }}

@@ -11,7 +11,7 @@
 export function levenshteinDistance(str1, str2) {
   const s1 = (str1 || '').toLowerCase().trim()
   const s2 = (str2 || '').toLowerCase().trim()
-  
+
   if (s1 === s2) return 0
   if (s1.length === 0) return s2.length
   if (s2.length === 0) return s1.length
@@ -50,7 +50,7 @@ export function levenshteinDistance(str1, str2) {
 export function similarityScore(str1, str2) {
   const s1 = (str1 || '').toLowerCase().trim()
   const s2 = (str2 || '').toLowerCase().trim()
-  
+
   if (s1 === s2) return 1.0
   if (s1.length === 0 || s2.length === 0) return 0.0
 
@@ -132,9 +132,31 @@ export function moveSuffixesToEnd(words) {
   return [...base, ...suffixes]
 }
 
+/**
+ * Title-case one token but keep Excel-style acronyms (LGU, PFO, BFAR, SAAD).
+ * Hyphenated chunks are handled separately so "LGU-Tubigon" → "LGU-Tubigon".
+ */
 const titleCaseWord = (word) => {
   if (!word || word.length === 0) return ''
+  if (word.includes('-')) {
+    const segs = word
+      .split('-')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((p) => titleCaseWord(p))
+    if (segs.length > 0) return segs.join('-')
+    if (word === '-') return '-'
+  }
   if (word.length === 1) return word.toUpperCase()
+  const letters = word.replace(/[^A-Za-z]/g, '')
+  if (
+    letters.length >= 2 &&
+    letters.length <= 6 &&
+    letters === letters.toUpperCase() &&
+    word === word.toUpperCase()
+  ) {
+    return word
+  }
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
 }
 
@@ -293,7 +315,7 @@ export function findSimilarNames(inputName, existingNames, threshold = 0.7) {
 
   // Sort by similarity (highest first)
   matches.sort((a, b) => b.similarity - a.similarity)
-  
+
   return matches
 }
 

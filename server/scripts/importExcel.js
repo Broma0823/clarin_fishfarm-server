@@ -76,6 +76,13 @@ const isMonthlySheet = (name = '') => {
   )
 }
 
+/** Sheets like "January (Groups)" / "February (Group)" — LGU/association format. */
+const isGroupAssociationSheet = (name = '') => {
+  const n = name.trim().toLowerCase()
+  if (!n.includes('group')) return false
+  return MONTH_KEYWORDS.some((kw) => kw.length >= 3 && n.includes(kw))
+}
+
 const matchesYear = (sheetName, targetYear) => {
   if (!targetYear) return true
   const yearMatch = sheetName.match(/\d{4}/)
@@ -89,6 +96,13 @@ const toNumber = (value) => {
   if (value === null || value === undefined || value === '') return null
   const cleaned = Number(String(value).replace(/,/g, ''))
   return Number.isFinite(cleaned) ? cleaned : null
+}
+
+/** beneficiary_distributions.quantity is BIGINT — Excel may have decimals (e.g. 31.5 kg). */
+const toIntegerQuantity = (value) => {
+  const n = toNumber(value)
+  if (n === null) return null
+  return Math.round(n)
 }
 
 const isGenderCell = (value) => {
@@ -173,7 +187,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[6] ?? null
     contact = row[7] ?? null
     species = row[8] ?? null
-    quantity = toNumber(row[9])
+    quantity = toIntegerQuantity(row[9])
     cost = toNumber(row[10]) ? toNumber(row[10]) * 1000 : null
     implementation_type = row[11] ?? null
     satisfaction = row[12] ?? null
@@ -186,7 +200,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[5] ?? null
     contact = row[6] ?? null
     species = row[7] ?? null
-    quantity = toNumber(row[8])
+    quantity = toIntegerQuantity(row[8])
     cost = toNumber(row[9]) ? toNumber(row[9]) * 1000 : null
     implementation_type = row[10] ?? null
     satisfaction = row[11] ?? null
@@ -197,7 +211,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[4] ?? null
     contact = row[5] ?? null
     species = row[6] ?? null
-    quantity = toNumber(row[7])
+    quantity = toIntegerQuantity(row[7])
     cost = toNumber(row[8]) ? toNumber(row[8]) * 1000 : null
     implementation_type = row[9] ?? null
     satisfaction = row[10] ?? null
@@ -289,12 +303,121 @@ const insertRows = async (rows) => {
 const cellIsDateHeader = (cell) =>
   typeof cell === 'string' && cell.trim().toUpperCase() === 'DATE'
 
-const extractRows = (sheet) => {
+const extractMatrixAfterDateHeader = (sheet) => {
   const matrix = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null })
   const headerIndex = matrix.findIndex((row) => row && cellIsDateHeader(row[0]))
   if (headerIndex === -1) return []
+  return matrix.slice(headerIndex + 1)
+}
 
-  return matrix.slice(headerIndex + 1).filter((row) => row && (row[1] != null || row[2] != null))
+const extractRows = (sheet) =>
+  extractMatrixAfterDateHeader(sheet).filter((row) => row && (row[1] != null || row[2] != null))
+
+const parseDayCell = (v) => {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'number' && v >= 1 && v <= 31) return v
+  const n = parseInt(String(v).trim(), 10)
+  return Number.isFinite(n) && n >= 1 && n <= 31 ? n : null
+}
+
+const flattenGroupBlock = (cur) => {
+  const name = cur.nameParts.join(' ').replace(/\s+/g, ' ').trim()
+  const day = cur.day
+  let barangay
+  let municipality
+  let contact
+  let rep
+  let species
+  let quantity
+  let cost
+  let implementation_type
+  let satisfaction
+  for (const r of cur.lines) {
+    if (r[3]) barangay = String(r[3]).trim() || barangay
+    if (r[4]) municipality = String(r[4]).trim() || municipality
+    if (r[5]) contact = String(r[5]).trim() || contact
+    if (r[6]) rep = String(r[6]).trim() || rep
+    if (r[7]) species = String(r[7]).trim() || species
+    if (r[8] != null && r[8] !== '') quantity = toIntegerQuantity(r[8]) ?? quantity
+    if (r[9] != null && r[9] !== '') cost = toNumber(r[9]) ? toNumber(r[9]) * 1000 : cost
+    if (r[10]) implementation_type = String(r[10]).trim() || implementation_type
+    if (r[11]) satisfaction = String(r[11]).trim() || satisfaction
+  }
+  const contactMerged = [contact, rep].filter(Boolean).join(' / ') || null
+  return {
+    day,
+    name,
+    barangay: barangay ?? null,
+    municipality: municipality ?? null,
+    contact: contactMerged,
+    species: species ?? null,
+    quantity: quantity ?? null,
+    cost: cost ?? null,
+    implementation_type: implementation_type ?? null,
+    satisfaction: satisfaction ?? null,
+  }
+}
+
+/** Merge continuation rows (split association name / address) into one logical record. */
+const mergeGroupAssociations = (rawRows) => {
+  const blocks = []
+  let cur = null
+  const flush = () => {
+    if (cur) {
+      blocks.push(flattenGroupBlock(cur))
+      cur = null
+    }
+  }
+
+  for (const row of rawRows) {
+    if (!row || !row.some((c) => c !== null && c !== '' && String(c).trim())) continue
+
+    const day = parseDayCell(row[0])
+    const cell1 = String(row[1] ?? '').trim()
+    const upper1 = cell1.toUpperCase()
+    if (upper1.includes('SUMMARY') || upper1.includes('PREPARED')) {
+      flush()
+      break
+    }
+
+    if (day !== null && cell1) {
+      flush()
+      cur = { day, lines: [row], nameParts: [cell1] }
+    } else if (cur && cell1 && day === null) {
+      cur.nameParts.push(cell1)
+      cur.lines.push(row)
+    } else if (cur && !cell1 && (row[7] || row[8])) {
+      cur.lines.push(row)
+    }
+  }
+  flush()
+  return blocks
+}
+
+const normalizeGroupFlatRow = (flat, sheetName, rowIndex) => {
+  if (!flat.name || flat.day == null) return null
+  if (!flat.species && flat.quantity == null) return null
+
+  const nameForDb = normalizeName(String(flat.name).trim()) || String(flat.name).trim().replace(/\s+/g, ' ')
+  const benId = beneficiaryExcelId(`group|${nameForDb}`, flat.barangay ?? '', flat.municipality ?? '')
+  const distId = distributionExcelId(sheetName, rowIndex, flat.day, benId)
+
+  return {
+    beneficiary_excel_id: benId,
+    distribution_excel_id: distId,
+    classification: 'group',
+    name: nameForDb,
+    gender: 'N/A',
+    barangay: flat.barangay,
+    municipality: flat.municipality,
+    contact: flat.contact,
+    species: flat.species,
+    quantity: flat.quantity,
+    cost: flat.cost,
+    implementation_type: flat.implementation_type,
+    satisfaction: flat.satisfaction,
+    date_implemented: buildDate(flat.day, sheetName),
+  }
 }
 
 const main = async () => {
@@ -311,7 +434,9 @@ const main = async () => {
 
   if (year) {
     defaultYear = year
-    console.log(`📅 Using year: ${year} for sheets without year in name`)
+    console.log(
+      `📅 Using year: ${year} for dates when the sheet name has no year (e.g. "April (Group)" or "November 2020" parsing).`
+    )
   }
 
   console.log('📥 Importing Excel file:', filePath)
@@ -320,6 +445,31 @@ const main = async () => {
   let totalInserted = 0
   let skippedByYear = 0
   for (const sheetName of workbook.SheetNames) {
+    if (isGroupAssociationSheet(sheetName)) {
+      if (year && !matchesYear(sheetName, year)) {
+        console.log(`⚠️  Skipping sheet "${sheetName}" (year doesn't match ${year})`)
+        skippedByYear++
+        continue
+      }
+
+      const sheet = workbook.Sheets[sheetName]
+      const rawMatrix = extractMatrixAfterDateHeader(sheet)
+      const merged = mergeGroupAssociations(rawMatrix)
+      const normalized = merged
+        .map((flat, idx) => normalizeGroupFlatRow(flat, sheetName, idx))
+        .filter(Boolean)
+
+      if (!normalized.length) {
+        console.log(`⚠️  Sheet "${sheetName}" (groups) did not contain valid rows`)
+        continue
+      }
+
+      await insertRows(normalized)
+      totalInserted += normalized.length
+      console.log(`✅ Imported ${normalized.length} group distribution(s) from "${sheetName}"`)
+      continue
+    }
+
     if (!isMonthlySheet(sheetName)) {
       console.log(`⚠️  Skipping sheet "${sheetName}" (not a monthly tab)`)
       continue

@@ -4,13 +4,13 @@ import { useState } from 'react'
 
 // Helper function to check parameter status
 const getParameterStatus = (value, min, max) => {
-  if (value === null || value === undefined) return { 
-    status: 'No Data', 
+  if (value === null || value === undefined) return {
+    status: 'No Data',
     color: '#9e9e9e',
     message: 'Waiting for device reading...'
   }
-  if (value >= min && value <= max) return { 
-    status: 'Normal', 
+  if (value >= min && value <= max) return {
+    status: 'Normal',
     color: '#4CAF50',
     message: 'Within optimal range for tilapia'
   }
@@ -19,8 +19,8 @@ const getParameterStatus = (value, min, max) => {
     color: '#ff9800',
     message: 'Below optimal range - action may be needed'
   }
-  return { 
-    status: 'High', 
+  return {
+    status: 'High',
     color: '#f44336',
     message: 'Above optimal range - action may be needed'
   }
@@ -29,7 +29,7 @@ const getParameterStatus = (value, min, max) => {
 // Info Icon Component
 const InfoIcon = ({ tooltip }) => {
   const [showTooltip, setShowTooltip] = useState(false)
-  
+
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <div
@@ -86,459 +86,184 @@ const InfoIcon = ({ tooltip }) => {
   )
 }
 
-// Gauge Component - Matching reference design
+// Gauge Component
 const ParameterGauge = ({ label, value, unit, min, max, optimalMin, optimalMax, color, description, tooltip }) => {
-  const percentage = value !== null && value !== undefined 
-    ? Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  const hasValue = value !== null && value !== undefined
+  const safeSpan = max - min || 1
+  const normalized = hasValue
+    ? Math.max(0, Math.min(100, ((value - min) / safeSpan) * 100))
     : 0
-  
+  const optimalStart = Math.max(0, Math.min(100, ((optimalMin - min) / safeSpan) * 100))
+  const optimalEnd = Math.max(0, Math.min(100, ((optimalMax - min) / safeSpan) * 100))
+
   const statusInfo = getParameterStatus(value, optimalMin, optimalMax)
-  const isNormal = statusInfo.status === 'Normal'
-  
-  // Calculate marker position (white marker on the bar)
-  const markerPosition = value !== null && value !== undefined 
-    ? `${100 - percentage}%`
-    : '100%'
-  
+  const statusTone = {
+    Normal: { bg: '#ecfdf3', border: '#22c55e33', text: '#15803d' },
+    Low: { bg: '#fff7ed', border: '#f9731633', text: '#c2410c' },
+    High: { bg: '#fef2f2', border: '#ef444433', text: '#b91c1c' },
+    'No Data': { bg: '#f8fafc', border: '#94a3b833', text: '#475569' },
+  }[statusInfo.status] || { bg: '#f8fafc', border: '#94a3b833', text: '#475569' }
+
   return (
-    <div style={{
-      background: '#f0f9f0',
-      borderRadius: '12px',
-      padding: '1.25rem',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-      border: `2px solid ${isNormal ? '#4CAF50' : '#e5e7eb'}`,
-      transition: 'all 0.3s ease',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Label */}
-      <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <p style={{
-          margin: 0,
-          fontSize: '0.875rem',
-          color: '#2d5016',
-          fontWeight: '600',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px'
-        }}>
-          {label}
-        </p>
-        {tooltip && <InfoIcon tooltip={tooltip} />}
-      </div>
-
-      {/* Digital Readout - Large and Prominent */}
-      <div style={{ 
-        marginBottom: '1rem',
-        textAlign: 'center'
-      }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'baseline',
-          gap: '0.5rem',
-          background: 'white',
-          padding: '0.75rem 1.25rem',
-          borderRadius: '8px',
-          boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
-        }}>
-          <span style={{
-            fontSize: '2.75rem',
-            fontWeight: '700',
-            color: '#1a202c',
-            lineHeight: 1,
-            fontFamily: 'monospace'
-          }}>
-            {value !== null && value !== undefined ? value.toFixed(value < 10 ? 2 : 1) : '—'}
-          </span>
-          {unit && (
-            <span style={{
-              fontSize: '1rem',
-              color: '#64748b',
-              fontWeight: '600',
-              marginLeft: '0.25rem'
-            }}>
-              {unit}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Visual Gauge - Vertical Bar (Full Width) */}
-      <div style={{
-        position: 'relative',
-        height: '220px',
-        background: '#ffffff',
-        borderRadius: '6px',
-        overflow: 'visible',
-        border: '2px solid #d1d5db',
-        marginBottom: '1rem',
-        paddingLeft: '40px',
-        paddingRight: '10px',
-        paddingTop: '10px',
-        paddingBottom: '10px'
-      }}>
-        {/* Background Grid Lines */}
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          paddingLeft: '40px',
-          paddingRight: '10px',
-          paddingTop: '10px',
-          paddingBottom: '10px',
+    <div
+      style={{
+        background: 'linear-gradient(160deg, #ffffff 0%, #f7fafc 100%)',
+        borderRadius: '16px',
+        padding: '1.25rem',
+        border: `1px solid ${statusTone.border}`,
+        boxShadow: '0 10px 22px rgba(15, 23, 42, 0.08)',
+      }}
+    >
+      <div
+        style={{
           display: 'flex',
-          flexDirection: 'column',
           justifyContent: 'space-between',
-          pointerEvents: 'none'
-        }}>
-          {Array.from({ length: 5 }).map((_, i) => {
-            const scaleValue = Math.round(max - (i * (max - min) / 4))
-            return (
-              <div
-                key={i}
-                style={{
-                  width: '100%',
-                  height: '1px',
-                  background: i === 2 ? '#9ca3af' : '#e5e7eb',
-                  position: 'relative'
-                }}
-              >
-                {/* Scale Labels on Left */}
-                <span style={{
-                  position: 'absolute',
-                  left: '-45px',
-                  top: '-8px',
-                  fontSize: '0.75rem',
-                  color: '#64748b',
-                  fontWeight: '500',
-                  fontFamily: 'monospace',
-                  background: '#f0f9f0',
-                  padding: '0 4px'
-                }}>
-                  {scaleValue}
-                </span>
-              </div>
-            )
-          })}
+          alignItems: 'center',
+          gap: '0.75rem',
+          marginBottom: '0.9rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '0.8rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: '#1f3b57',
+              fontWeight: '700',
+            }}
+          >
+            {label}
+          </p>
+          {tooltip && <InfoIcon tooltip={tooltip} />}
         </div>
-
-        {/* Optimal Range Highlight - Green Band */}
-        <div style={{
-          position: 'absolute',
-          bottom: '10px',
-          left: '40px',
-          right: '10px',
-          top: `${100 - ((optimalMax - min) / (max - min)) * 100}%`,
-          background: 'rgba(76, 175, 80, 0.25)',
-          borderTop: '2px solid #4CAF50',
-          borderBottom: '2px solid #4CAF50',
-          pointerEvents: 'none',
-          zIndex: 1
-        }}>
-          {/* SAFE Label */}
-          <div style={{
-            position: 'absolute',
-            right: '-50px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            fontSize: '0.75rem',
-            color: '#4CAF50',
+        <span
+          style={{
+            fontSize: '0.72rem',
             fontWeight: '700',
-            whiteSpace: 'nowrap'
-          }}>
-            SAFE
-          </div>
-        </div>
+            padding: '0.25rem 0.55rem',
+            borderRadius: '999px',
+            background: statusTone.bg,
+            color: statusTone.text,
+            border: `1px solid ${statusTone.border}`,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {statusInfo.status}
+        </span>
+      </div>
 
-        {/* Current Value Bar - Full Width Fill */}
-        {value !== null && value !== undefined && (
-          <>
-            {/* Filled Bar */}
-            <div style={{
-              position: 'absolute',
-              bottom: '10px',
-              left: '40px',
-              right: '10px',
-              height: `${percentage * 0.9}%`,
-              background: color,
-              transition: 'height 0.5s ease',
-              borderRadius: '4px 4px 0 0',
-              zIndex: 2
-            }}>
-              {/* White Rectangular Marker at Top Edge */}
-              <div style={{
-                position: 'absolute',
-                top: '-8px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: '70px',
-                height: '18px',
-                background: 'white',
-                borderRadius: '3px',
-                border: '2px solid #1a202c',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 3
-              }}>
-                {/* Gray Dot in Center */}
-                <div style={{
-                  width: '5px',
-                  height: '5px',
-                  background: '#64748b',
-                  borderRadius: '50%'
-                }}></div>
-              </div>
-            </div>
-            
-            {/* Dark Gray Area Above Marker */}
-            <div style={{
-              position: 'absolute',
-              bottom: `${percentage * 0.9 + 2}%`,
-              left: '40px',
-              right: '10px',
-              top: '10px',
-              background: '#374151',
-              borderRadius: '0 0 4px 4px',
-              zIndex: 1
-            }}></div>
-          </>
+      <div style={{ marginBottom: '1rem' }}>
+        <span
+          style={{
+            fontSize: '2.25rem',
+            fontWeight: '800',
+            color: '#0f2942',
+            fontFamily: 'monospace',
+            letterSpacing: '-0.03em',
+          }}
+        >
+          {hasValue ? value.toFixed(value < 10 ? 2 : 1) : '—'}
+        </span>
+        {unit && (
+          <span style={{ marginLeft: '0.35rem', fontSize: '1rem', fontWeight: '700', color: '#64748b' }}>
+            {unit}
+          </span>
         )}
       </div>
 
-      {/* Status Indicators - Clear Visual Indicators */}
-      <div style={{
-        marginTop: '0.75rem',
-        padding: '0.75rem',
-        background: isNormal ? '#e8f5e9' : statusInfo.status === 'Low' ? '#fff3e0' : '#ffebee',
-        borderRadius: '8px',
-        border: `2px solid ${statusInfo.color}`,
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.75rem',
-          marginBottom: '0.5rem'
-        }}>
-          {/* Large Status Icon */}
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            background: statusInfo.color,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: `0 0 12px ${statusInfo.color}60`
-          }}>
-            {isNormal ? (
-              <span style={{ color: 'white', fontSize: '1.5rem' }}>✓</span>
-            ) : statusInfo.status === 'Low' ? (
-              <span style={{ color: 'white', fontSize: '1.5rem' }}>↓</span>
-            ) : (
-              <span style={{ color: 'white', fontSize: '1.5rem' }}>↑</span>
-            )}
-          </div>
-          
-          {/* Status Text */}
-          <div style={{ flex: 1 }}>
-            <div style={{
-              fontSize: '1.1rem',
-              fontWeight: '700',
-              color: statusInfo.color,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              marginBottom: '0.25rem'
-            }}>
-              {statusInfo.status}
-            </div>
-            <div style={{
-              fontSize: '0.8rem',
-              color: '#64748b',
-              marginBottom: '0.25rem',
-              lineHeight: '1.4'
-            }}>
-              {statusInfo.message}
-            </div>
-            {/* Percentage from Optimal */}
-            {value !== null && value !== undefined && !isNormal && (
-              <div style={{
-                fontSize: '0.75rem',
-                color: statusInfo.color,
-                fontWeight: '600',
-                marginTop: '0.25rem'
-              }}>
-                {value < optimalMin 
-                  ? `↓ ${(((optimalMin - value) / optimalMin) * 100).toFixed(1)}% below optimal`
-                  : `↑ ${(((value - optimalMax) / optimalMax) * 100).toFixed(1)}% above optimal`
-                }
-              </div>
-            )}
-            {value !== null && value !== undefined && isNormal && (
-              <div style={{
-                fontSize: '0.75rem',
-                color: '#4CAF50',
-                fontWeight: '600',
-                marginTop: '0.25rem'
-              }}>
-                ✓ Perfect condition
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Range Indicator */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.7rem',
-          color: '#64748b',
-          marginTop: '0.5rem',
-          paddingTop: '0.5rem',
-          borderTop: '1px solid rgba(0,0,0,0.1)'
-        }}>
-          <span>Min: {min}{unit}</span>
-          <span style={{ 
-            color: '#4CAF50', 
-            fontWeight: '600',
-            background: '#e8f5e9',
-            padding: '0.25rem 0.5rem',
-            borderRadius: '4px'
-          }}>
-            Optimal: {optimalMin}-{optimalMax}{unit}
-          </span>
-          <span>Max: {max}{unit}</span>
-        </div>
-
-        {/* Current Value Position Indicator with Visual Bar */}
-        {value !== null && value !== undefined && (
-          <div style={{
-            marginTop: '0.5rem',
-            padding: '0.75rem',
-            background: 'white',
-            borderRadius: '8px',
-            border: '1px solid #e5e7eb'
-          }}>
-            {/* Current Value Display */}
-            <div style={{
-              fontSize: '0.85rem',
-              textAlign: 'center',
-              marginBottom: '0.75rem'
-            }}>
-              <span style={{ fontWeight: '600', color: '#1a202c' }}>Current Reading: </span>
-              <span style={{ 
-                fontWeight: '700', 
-                color: statusInfo.color,
-                fontSize: '1rem',
-                fontFamily: 'monospace'
-              }}>
-                {value.toFixed(value < 10 ? 2 : 1)}{unit}
-              </span>
-            </div>
-
-            {/* Visual Progress Bar */}
-            <div style={{
-              position: 'relative',
-              height: '24px',
-              background: '#f1f5f9',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              border: '1px solid #e5e7eb',
-              marginBottom: '0.5rem'
-            }}>
-              {/* Optimal Range Zone */}
-              <div style={{
+      <div style={{ marginBottom: '0.8rem' }}>
+        <div
+          style={{
+            position: 'relative',
+            height: '20px',
+            borderRadius: '999px',
+            background: '#e2e8f0',
+            overflow: 'hidden',
+            border: '1px solid #cbd5e1',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: `${optimalStart}%`,
+              width: `${Math.max(0, optimalEnd - optimalStart)}%`,
+              top: 0,
+              bottom: 0,
+              background: 'linear-gradient(90deg, #86efac 0%, #4ade80 100%)',
+              opacity: 0.55,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${normalized}%`,
+              background: `linear-gradient(90deg, ${color}aa 0%, ${color} 100%)`,
+              transition: 'width 0.45s ease',
+            }}
+          />
+          {hasValue && (
+            <div
+              style={{
                 position: 'absolute',
-                left: `${((optimalMin - min) / (max - min)) * 100}%`,
-                width: `${((optimalMax - optimalMin) / (max - min)) * 100}%`,
-                height: '100%',
-                background: '#4CAF50',
-                opacity: 0.3
-              }}></div>
-              
-              {/* Current Value Indicator */}
-              <div style={{
-                position: 'absolute',
-                left: `${((value - min) / (max - min)) * 100}%`,
+                left: `${normalized}%`,
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
-                width: '4px',
-                height: '100%',
+                width: '16px',
+                height: '16px',
+                borderRadius: '999px',
+                border: '2px solid white',
                 background: statusInfo.color,
-                borderRadius: '2px',
-                boxShadow: `0 0 8px ${statusInfo.color}80`,
-                zIndex: 2
-              }}></div>
-              
-              {/* Scale Labels */}
-              <div style={{
-                position: 'absolute',
-                top: '-20px',
-                left: 0,
-                right: 0,
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.65rem',
-                color: '#94a3b8'
-              }}>
-                <span>{min}{unit}</span>
-                <span style={{ color: '#4CAF50', fontWeight: '600' }}>{optimalMin}-{optimalMax}{unit}</span>
-                <span>{max}{unit}</span>
-              </div>
-            </div>
+                boxShadow: `0 0 0 3px ${statusInfo.color}33`,
+              }}
+            />
+          )}
+        </div>
+        <div
+          style={{
+            marginTop: '0.45rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: '0.72rem',
+            color: '#64748b',
+            fontWeight: '600',
+          }}
+        >
+          <span>{min}{unit}</span>
+          <span style={{ color: '#15803d' }}>
+            Optimal {optimalMin}-{optimalMax}{unit}
+          </span>
+          <span>{max}{unit}</span>
+        </div>
+      </div>
 
-            {/* Status Message */}
-            {!isNormal && (
-              <div style={{ 
-                textAlign: 'center',
-                padding: '0.5rem',
-                background: `${statusInfo.color}15`,
-                borderRadius: '6px',
-                marginTop: '0.5rem'
-              }}>
-                <span style={{ 
-                  color: statusInfo.color,
-                  fontWeight: '700',
-                  fontSize: '0.8rem'
-                }}>
-                  ⚠ {value < optimalMin 
-                    ? `${(optimalMin - value).toFixed(1)}${unit} TOO LOW - Need to increase`
-                    : `${(value - optimalMax).toFixed(1)}${unit} TOO HIGH - Need to decrease`
-                  }
-                </span>
-              </div>
-            )}
-            {isNormal && (
-              <div style={{ 
-                textAlign: 'center',
-                padding: '0.5rem',
-                background: '#e8f5e9',
-                borderRadius: '6px',
-                marginTop: '0.5rem'
-              }}>
-                <span style={{ 
-                  color: '#4CAF50',
-                  fontWeight: '700',
-                  fontSize: '0.8rem'
-                }}>
-                  ✓ Within optimal range - Good condition!
-                </span>
-              </div>
-            )}
-          </div>
+      <div
+        style={{
+          background: statusTone.bg,
+          borderRadius: '10px',
+          padding: '0.65rem 0.75rem',
+          border: `1px solid ${statusTone.border}`,
+        }}
+      >
+        <p style={{ margin: 0, fontSize: '0.8rem', color: statusTone.text, fontWeight: '700' }}>
+          {statusInfo.message}
+        </p>
+        {hasValue && !['Normal', 'No Data'].includes(statusInfo.status) && (
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: '#475569' }}>
+            {value < optimalMin
+              ? `Needs +${(optimalMin - value).toFixed(1)}${unit} to reach optimal range.`
+              : `Needs -${(value - optimalMax).toFixed(1)}${unit} to return to optimal range.`}
+          </p>
         )}
       </div>
 
-      {/* Optimal Range Info */}
       {description && (
-        <p style={{
-          margin: '0.75rem 0 0 0',
-          fontSize: '0.7rem',
-          color: '#64748b',
-          textAlign: 'center',
-          lineHeight: '1.4'
-        }}>
+        <p style={{ margin: '0.7rem 0 0', fontSize: '0.73rem', color: '#64748b', lineHeight: 1.45 }}>
           {description}
         </p>
       )}
@@ -573,7 +298,7 @@ export const MonitoringDashboardContent = ({
   const now = new Date()
   const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   const currentDate = now.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  
+
   // Calculate next data collection time (every 30 seconds, so next is 30 seconds from now)
   const nextCollection = new Date(now.getTime() + 30000)
   const nextTime = nextCollection.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -1022,7 +747,7 @@ export const MonitoringDashboardContent = ({
         padding: '1.5rem',
         boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
       }}>
-        <div style={{ 
+        <div style={{
           marginBottom: '1rem',
           display: 'flex',
           justifyContent: 'space-between',

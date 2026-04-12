@@ -70,7 +70,8 @@ export const listDistributions = async (req, res, next) => {
         b.name,
         b.gender,
         b.barangay,
-        b.municipality
+        b.municipality,
+        b.contact
       FROM beneficiary_distributions d
       JOIN beneficiaries b ON b.id = d.beneficiary_id
       ${where}
