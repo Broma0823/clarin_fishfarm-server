@@ -529,6 +529,19 @@ export const MonitoringDashboardContent = ({
               description="Acidity/alkalinity of pond water"
               tooltip="pH measures how acidic or alkaline the water is. Tilapia thrive in pH 6.5–8.5. Low pH stresses fish and reduces appetite; high pH can cause ammonia toxicity."
             />
+            {/* Dissolved Oxygen Gauge */}
+            <ParameterGauge
+              label="Dissolved Oxygen"
+              value={deviceReadings.dissolvedOxygen}
+              unit="V"
+              min={0}
+              max={3.5}
+              optimalMin={0.5}
+              optimalMax={3.0}
+              color="#06b6d4"
+              description="Raw sensor voltage (uncalibrated)"
+              tooltip="Dissolved oxygen sensor is currently uncalibrated — displaying raw estimated module voltage. Once calibrated with fill solution, this will show mg/L values."
+            />
           </div>
         </div>
       )}

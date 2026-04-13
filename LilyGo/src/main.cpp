@@ -9,7 +9,6 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-// Set to 0 (e.g. build flag -DSERIAL_DEBUG=0) to silence all monitor debug; HTTP still runs.
 #ifndef SERIAL_DEBUG
 #define SERIAL_DEBUG 1
 #endif
@@ -23,7 +22,6 @@
 #define DBG_PRINTF(...)
 #endif
 
-// WiFi: primary + fallback hotspot (WiFiMulti tries in addAP order)
 const char *WIFI_SSID = "R3JHOMEFIBRa4780";
 const char *WIFI_PASSWORD = "R3JWIFIwwk9a";
 const char *WIFI_SSID_2 = "iPhone";
@@ -60,35 +58,46 @@ static unsigned long wifiReconnectBackoffMs()
 const char *CYCLE_ID = "CYCLE-2026-01";
 const char *CYCLE_START_DATE = "2026-04-07";
 
-const unsigned long SAMPLE_INTERVAL_MS = 10000UL; // 10 seconds between POSTs
+const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
 unsigned long lastSampleMs = 0;
 
-/** Sensor / WiFi status lines on the monitor — independent of upload interval. */
 #define DEBUG_PRINT_INTERVAL_MS 3000UL
 static unsigned long lastDebugPrintMs = 0;
 
-// DS18B20 data pin (must match wiring). GPIO2 is a strapping pin; if reads are flaky, try 4 or 15.
-#define ONE_WIRE_BUS 2
-
+#define ONE_WIRE_BUS 4
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 static bool gDs18b20Ready = false;
 
-// --- pH sensor (analog via voltage divider) ---
 static const int PH_ADC_PIN = 34;
+static const int DO_ADC_PIN = 35;
 static const float ADC_VREF = 3.3f;
 static const float ADC_MAX = 4095.0f;
 static const float R_DIV_TOP_OHMS = 2200.0f;
 static const float R_DIV_BOTTOM_OHMS = 3000.0f;
 static const float DIVIDER_SCALE =
     (R_DIV_TOP_OHMS + R_DIV_BOTTOM_OHMS) / R_DIV_BOTTOM_OHMS;
+static const float DO_R_DIV_TOP_OHMS = 2200.0f;
+static const float DO_R_DIV_BOTTOM_OHMS = 3000.0f;
+static const float DO_DIVIDER_SCALE =
+    (DO_R_DIV_TOP_OHMS + DO_R_DIV_BOTTOM_OHMS) / DO_R_DIV_BOTTOM_OHMS;
 static float phCalibrationValue = 24.05f - 1.05f;
+
+struct DoReading
+{
+  uint32_t rawAdc;
+  float voltagePin;
+  float voltageModuleEst;
+};
 
 struct TxJob
 {
   float tempC;
   float phLevel;
+  uint32_t doRawAdc;
+  float doVoltagePin;
+  float doVoltageModuleEst;
 };
 
 struct TxResult
@@ -101,7 +110,6 @@ struct TxResult
 static QueueHandle_t txJobQueue = nullptr;
 static QueueHandle_t txResultQueue = nullptr;
 
-/** Read pH from analog pin: 10 samples, sort, average middle 6, apply divider + calibration. */
 static float readPhLevel()
 {
   int buf[10];
@@ -126,12 +134,24 @@ static float readPhLevel()
 
   const float voltAtPin = (float)avgval * (ADC_VREF / ADC_MAX) / 6.0f;
   const float voltModule = voltAtPin * DIVIDER_SCALE;
-  const float ph = -5.70f * voltModule + phCalibrationValue;
-
-  return ph;
+  return -5.70f * voltModule + phCalibrationValue;
 }
 
-/** HTTP only — no Serial; safe to call from the TX worker task. */
+static DoReading readDoRaw()
+{
+  DoReading r = {0, 0.0f, 0.0f};
+  uint32_t sum = 0;
+  for (int i = 0; i < 20; i++)
+  {
+    sum += (uint32_t)analogRead(DO_ADC_PIN);
+    delay(2);
+  }
+  r.rawAdc = sum / 20U;
+  r.voltagePin = ((float)r.rawAdc * ADC_VREF) / ADC_MAX;
+  r.voltageModuleEst = r.voltagePin * DO_DIVIDER_SCALE;
+  return r;
+}
+
 static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
 {
   std::memset(out, 0, sizeof(*out));
@@ -154,7 +174,8 @@ static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
   body += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
   body += "\"cycleStartDate\":\"" + String(CYCLE_START_DATE) + "\",";
   body += "\"waterTemperature\":" + String(job.tempC, 2) + ",";
-  body += "\"phLevel\":" + String(job.phLevel, 2);
+  body += "\"phLevel\":" + String(job.phLevel, 2) + ",";
+  body += "\"dissolvedOxygen\":" + String(job.doVoltageModuleEst, 3);
   body += "}";
 
   const int status = http.POST(body);
@@ -189,7 +210,6 @@ static void transmitWorker(void *)
   }
 }
 
-/** Upload outcome — always on Serial (not tied to SERIAL_DEBUG). */
 static void drainTxResults(void)
 {
   TxResult r;
@@ -214,21 +234,6 @@ void printAddress(DeviceAddress deviceAddress)
       DBG_PRINT("0");
     DBG_PRINT(deviceAddress[i], HEX);
   }
-}
-
-void printTemperature(DeviceAddress deviceAddress)
-{
-  float tempC = sensors.getTempC(deviceAddress);
-  if (tempC == DEVICE_DISCONNECTED_C)
-  {
-    DBG_PRINTLN("Error: Could not read temperature data");
-    return;
-  }
-
-  DBG_PRINT("Temp C: ");
-  DBG_PRINT(tempC);
-  DBG_PRINT(" Temp F: ");
-  DBG_PRINTLN(DallasTemperature::toFahrenheit(tempC));
 }
 
 static void registerWifiNetworks()
@@ -256,32 +261,7 @@ void printWifiStatus()
   }
   else
   {
-    DBG_PRINTF("DISCONNECTED  code=%d (", (int)s);
-    switch (s)
-    {
-    case WL_IDLE_STATUS:
-      DBG_PRINT("IDLE");
-      break;
-    case WL_NO_SSID_AVAIL:
-      DBG_PRINT("NO_SSID");
-      break;
-    case WL_SCAN_COMPLETED:
-      DBG_PRINT("SCAN_DONE");
-      break;
-    case WL_CONNECT_FAILED:
-      DBG_PRINT("CONNECT_FAILED");
-      break;
-    case WL_CONNECTION_LOST:
-      DBG_PRINT("CONN_LOST");
-      break;
-    case WL_DISCONNECTED:
-      DBG_PRINT("DISCONNECTED");
-      break;
-    default:
-      DBG_PRINT("?");
-      break;
-    }
-    DBG_PRINTLN(")");
+    DBG_PRINTF("DISCONNECTED  code=%d\n", (int)s);
   }
 }
 
@@ -311,9 +291,7 @@ bool smartWiFiConnect()
   {
     wifiReconnectFailCount = 0;
     DBG_PRINT("[WiFi] OK (quick). SSID: ");
-    DBG_PRINT(WiFi.SSID());
-    DBG_PRINT("  IP: ");
-    DBG_PRINTLN(WiFi.localIP());
+    DBG_PRINTLN(WiFi.SSID());
     return true;
   }
 
@@ -324,23 +302,16 @@ bool smartWiFiConnect()
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(WIFI_PS_NONE);
 
-  DBG_PRINT("[WiFi] Trying networks");
   int tries = 0;
   while (wifiMulti.run() != WL_CONNECTED && tries < WIFI_FULL_CONNECT_TRIES)
   {
     delay(WIFI_FULL_CONNECT_STEP_MS);
-    DBG_PRINT(".");
     tries++;
   }
-  DBG_PRINTLN();
 
   if (WiFi.status() == WL_CONNECTED)
   {
     wifiReconnectFailCount = 0;
-    DBG_PRINT("[WiFi] OK. SSID: ");
-    DBG_PRINT(WiFi.SSID());
-    DBG_PRINT("  IP: ");
-    DBG_PRINTLN(WiFi.localIP());
     return true;
   }
 
@@ -362,7 +333,6 @@ void monitorWiFi()
     if (!wifiLinkWasUp)
     {
       wifiLinkWasUp = true;
-      DBG_PRINTLN("[WiFi] Link up.");
       lastWifiStatusLogMs = millis();
       printWifiStatus();
     }
@@ -389,11 +359,17 @@ void setup(void)
   Serial.begin(115200);
   Serial.setTxBufferSize(2048);
   delay(200);
-  DBG_PRINTLN("Fishfarm Monitoring: Temperature + pH");
+  DBG_PRINTLN("Fishfarm Monitoring: Temperature + pH + DO(raw)");
   DBG_PRINT("API URL: ");
   DBG_PRINTLN(FISHFARM_API_URL);
 
   analogSetPinAttenuation(PH_ADC_PIN, ADC_11db);
+  analogSetPinAttenuation(DO_ADC_PIN, ADC_11db);
+
+  DBG_PRINTF("[DIAG] GPIO%d raw ADC = %d (expect >0 if DO board wired)\n",
+             DO_ADC_PIN, analogRead(DO_ADC_PIN));
+  DBG_PRINTF("[DIAG] GPIO%d raw ADC = %d (pH pin for comparison)\n",
+             PH_ADC_PIN, analogRead(PH_ADC_PIN));
 
   txJobQueue = xQueueCreate(2, sizeof(TxJob));
   txResultQueue = xQueueCreate(4, sizeof(TxResult));
@@ -401,47 +377,22 @@ void setup(void)
   {
     xTaskCreatePinnedToCore(transmitWorker, "txMon", 8192, nullptr, 1, nullptr, 0);
   }
-  else
-  {
-    DBG_PRINTLN("FATAL: TX queues not created");
-  }
 
-  // Probe DS18B20 before WiFi starts — avoids RF activity during OneWire reset/search.
   pinMode(ONE_WIRE_BUS, INPUT_PULLUP);
   sensors.begin();
-  DBG_PRINT("Locating devices on GPIO ");
-  DBG_PRINT(ONE_WIRE_BUS);
-  DBG_PRINT("... ");
   const uint8_t nDev = sensors.getDeviceCount();
-  DBG_PRINT("found ");
-  DBG_PRINT(nDev, DEC);
-  DBG_PRINTLN(".");
-
-  if (nDev == 0)
+  if (nDev == 0 || !sensors.getAddress(insideThermometer, 0))
   {
-    DBG_PRINTLN("ERROR: No DS18B20. Check DATA->GPIO wire, 3.3V, GND, 4k7 pull-up DATA->3.3V.");
     gDs18b20Ready = false;
+    DBG_PRINTLN("ERROR: DS18B20 not ready.");
   }
   else
   {
-    DBG_PRINT("Parasite power is: ");
-    DBG_PRINTLN(sensors.isParasitePowerMode() ? "ON" : "OFF");
-
-    if (!sensors.getAddress(insideThermometer, 0))
-    {
-      DBG_PRINTLN("ERROR: getAddress(0) failed despite deviceCount>0 — bus glitch?");
-      gDs18b20Ready = false;
-    }
-    else
-    {
-      DBG_PRINT("Device 0 Address: ");
-      printAddress(insideThermometer);
-      DBG_PRINTLN();
-      sensors.setResolution(insideThermometer, 10);
-      DBG_PRINT("Device 0 Resolution (bits): ");
-      DBG_PRINTLN(sensors.getResolution(insideThermometer), DEC);
-      gDs18b20Ready = true;
-    }
+    sensors.setResolution(insideThermometer, 10);
+    gDs18b20Ready = true;
+    DBG_PRINT("DS18B20 Address: ");
+    printAddress(insideThermometer);
+    DBG_PRINTLN();
   }
 
   smartWiFiConnect();
@@ -487,15 +438,17 @@ void loop(void)
 
   const float tempC = sensors.getTempC(insideThermometer);
   const float phValue = readPhLevel();
+  const DoReading doReading = readDoRaw();
 
   if (doDebugPrint)
   {
     if (tempC == DEVICE_DISCONNECTED_C)
       DBG_PRINTLN("Temp: (disconnected)");
     else
-      DBG_PRINTF("Temp: %.2f C  (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
-
+      DBG_PRINTF("Temp: %.2f C (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
     DBG_PRINTF("pH: %.2f\n", phValue);
+    DBG_PRINTF("DO raw: %lu | DO V@pin: %.3f V | DO V@mod(est): %.3f V | UNCALIBRATED\n",
+               doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst);
     lastDebugPrintMs = nowMs;
   }
 
@@ -509,7 +462,7 @@ void loop(void)
     return;
   }
 
-  TxJob job = {tempC, phValue};
+  TxJob job = {tempC, phValue, doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst};
   if (xQueueSend(txJobQueue, &job, 0) != pdTRUE)
   {
     DBG_PRINTLN("[DBG] TX queue full (POST still running); will retry.");
