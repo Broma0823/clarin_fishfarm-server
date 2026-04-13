@@ -1,5 +1,28 @@
 import { query } from '../db/pool.js'
 
+const mapRow = (row) => ({
+  id: row.id,
+  cycleId: row.cycle_id,
+  cycleStartDate: row.cycle_start_date,
+  cycleEndDate: row.cycle_end_date,
+  waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
+  dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
+  phLevel: row.ph_level ? Number(row.ph_level) : null,
+  numberOfBreeders: row.number_of_breeders,
+  breederRatio: row.breeder_ratio,
+  feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
+  weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
+  weatherHumidity: row.weather_humidity,
+  weatherCondition: row.weather_condition,
+  weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
+  totalFryProduced: row.total_fry_produced,
+  harvestDate: row.harvest_date,
+  recordedAt: row.recorded_at,
+  notes: row.notes,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
 export const listMonitoringParameters = async (req, res, next) => {
   try {
     const { cycleId, startDate, endDate } = req.query
@@ -35,27 +58,7 @@ export const listMonitoringParameters = async (req, res, next) => {
     const result = await query(sql, params)
     
     res.json({
-      data: result.rows.map((row) => ({
-        id: row.id,
-        cycleId: row.cycle_id,
-        cycleStartDate: row.cycle_start_date,
-        waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
-        dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
-        phLevel: row.ph_level ? Number(row.ph_level) : null,
-        numberOfBreeders: row.number_of_breeders,
-        breederRatio: row.breeder_ratio,
-        feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
-        weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
-        weatherHumidity: row.weather_humidity,
-        weatherCondition: row.weather_condition,
-        weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
-        totalFryProduced: row.total_fry_produced,
-        harvestDate: row.harvest_date,
-        recordedAt: row.recorded_at,
-        notes: row.notes,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })),
+      data: result.rows.map(mapRow),
     })
   } catch (error) {
     next(error)
@@ -73,25 +76,7 @@ export const getMonitoringParameter = async (req, res, next) => {
     
     const row = result.rows[0]
     res.json({
-      data: {
-        id: row.id,
-        cycleId: row.cycle_id,
-        cycleStartDate: row.cycle_start_date,
-        waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
-        dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
-        phLevel: row.ph_level ? Number(row.ph_level) : null,
-        numberOfBreeders: row.number_of_breeders,
-        breederRatio: row.breeder_ratio,
-        feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
-        weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
-        weatherHumidity: row.weather_humidity,
-        weatherCondition: row.weather_condition,
-        weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
-        recordedAt: row.recorded_at,
-        notes: row.notes,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      },
+      data: mapRow(row),
     })
   } catch (error) {
     next(error)
@@ -103,6 +88,7 @@ export const createMonitoringParameter = async (req, res, next) => {
     const {
       cycleId,
       cycleStartDate,
+      cycleEndDate,
       waterTemperature,
       dissolvedOxygen,
       phLevel,
@@ -116,22 +102,57 @@ export const createMonitoringParameter = async (req, res, next) => {
       notes,
     } = req.body
     
+    const isSensorData = !numberOfBreeders && !breederRatio && !feedAllocation
+    let resolvedCycleId = cycleId
+    let resolvedStartDate = cycleStartDate
+    let resolvedEndDate = cycleEndDate || null
+
+    if (isSensorData) {
+      // ESP32 sensor reading: attach to the current active manually-created cycle
+      const activeCycle = await query(
+        `SELECT cycle_id, cycle_start_date, cycle_end_date
+         FROM monitoring_parameters
+         WHERE (number_of_breeders IS NOT NULL OR breeder_ratio IS NOT NULL OR feed_allocation IS NOT NULL)
+           AND cycle_end_date IS NULL
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      if (activeCycle.rows.length > 0) {
+        resolvedCycleId = activeCycle.rows[0].cycle_id
+        resolvedStartDate = activeCycle.rows[0].cycle_start_date
+      }
+    }
+
+    // If this cycle was already ended, carry over the end date
+    if (resolvedCycleId && !resolvedEndDate) {
+      const existing = await query(
+        `SELECT cycle_end_date FROM monitoring_parameters
+         WHERE cycle_id = $1 AND cycle_end_date IS NOT NULL
+         LIMIT 1`,
+        [resolvedCycleId]
+      )
+      if (existing.rows.length > 0) {
+        resolvedEndDate = existing.rows[0].cycle_end_date
+      }
+    }
+
     const sql = `
       INSERT INTO monitoring_parameters (
-        cycle_id, cycle_start_date,
+        cycle_id, cycle_start_date, cycle_end_date,
         water_temperature, dissolved_oxygen, ph_level,
         number_of_breeders, breeder_ratio, feed_allocation,
         weather_temperature, weather_humidity, weather_condition, weather_wind_speed,
         notes
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
       )
       RETURNING *
     `
     
     const result = await query(sql, [
-      cycleId,
-      cycleStartDate,
+      resolvedCycleId,
+      resolvedStartDate,
+      resolvedEndDate,
       waterTemperature || null,
       dissolvedOxygen || null,
       phLevel || null,
@@ -147,25 +168,7 @@ export const createMonitoringParameter = async (req, res, next) => {
     
     const row = result.rows[0]
     res.status(201).json({
-      data: {
-        id: row.id,
-        cycleId: row.cycle_id,
-        cycleStartDate: row.cycle_start_date,
-        waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
-        dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
-        phLevel: row.ph_level ? Number(row.ph_level) : null,
-        numberOfBreeders: row.number_of_breeders,
-        breederRatio: row.breeder_ratio,
-        feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
-        weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
-        weatherHumidity: row.weather_humidity,
-        weatherCondition: row.weather_condition,
-        weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
-        recordedAt: row.recorded_at,
-        notes: row.notes,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      },
+      data: mapRow(row),
     })
   } catch (error) {
     next(error)
@@ -178,6 +181,8 @@ export const updateMonitoringParameter = async (req, res, next) => {
     const {
       cycleId,
       cycleStartDate,
+      cycleEndDate,
+      cycle_end_date,
       waterTemperature,
       dissolvedOxygen,
       phLevel,
@@ -200,30 +205,33 @@ export const updateMonitoringParameter = async (req, res, next) => {
       SET
         cycle_id = COALESCE($1, cycle_id),
         cycle_start_date = COALESCE($2, cycle_start_date),
-        water_temperature = $3,
-        dissolved_oxygen = $4,
-        ph_level = $5,
-        number_of_breeders = $6,
-        breeder_ratio = $7,
-        feed_allocation = $8,
-        weather_temperature = $9,
-        weather_humidity = $10,
-        weather_condition = $11,
-        weather_wind_speed = $12,
-        notes = $13,
-        total_fry_produced = COALESCE($14, total_fry_produced),
-        harvest_date = COALESCE($15, harvest_date),
+        cycle_end_date = COALESCE($3, cycle_end_date),
+        water_temperature = $4,
+        dissolved_oxygen = $5,
+        ph_level = $6,
+        number_of_breeders = $7,
+        breeder_ratio = $8,
+        feed_allocation = $9,
+        weather_temperature = $10,
+        weather_humidity = $11,
+        weather_condition = $12,
+        weather_wind_speed = $13,
+        notes = $14,
+        total_fry_produced = COALESCE($15, total_fry_produced),
+        harvest_date = COALESCE($16, harvest_date),
         updated_at = NOW()
-      WHERE id = $16
+      WHERE id = $17
       RETURNING *
     `
     
     const totalFry = totalFryProduced !== undefined ? totalFryProduced : total_fry_produced
     const harvest = harvestDate || harvest_date
+    const endDate = cycleEndDate || cycle_end_date
     
     const result = await query(sql, [
       cycleId || null,
       cycleStartDate || null,
+      endDate || null,
       waterTemperature !== undefined ? waterTemperature : null,
       dissolvedOxygen !== undefined ? dissolvedOxygen : null,
       phLevel !== undefined ? phLevel : null,
@@ -246,25 +254,7 @@ export const updateMonitoringParameter = async (req, res, next) => {
     
     const row = result.rows[0]
     res.json({
-      data: {
-        id: row.id,
-        cycleId: row.cycle_id,
-        cycleStartDate: row.cycle_start_date,
-        waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
-        dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
-        phLevel: row.ph_level ? Number(row.ph_level) : null,
-        numberOfBreeders: row.number_of_breeders,
-        breederRatio: row.breeder_ratio,
-        feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
-        weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
-        weatherHumidity: row.weather_humidity,
-        weatherCondition: row.weather_condition,
-        weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
-        recordedAt: row.recorded_at,
-        notes: row.notes,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      },
+      data: mapRow(row),
     })
   } catch (error) {
     next(error)
@@ -281,6 +271,43 @@ export const deleteMonitoringParameter = async (req, res, next) => {
     }
     
     res.json({ message: 'Monitoring parameter deleted successfully' })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const endCycle = async (req, res, next) => {
+  try {
+    const { cycleId, totalFryProduced, notes } = req.body
+    if (!cycleId) {
+      return res.status(400).json({ error: 'cycleId is required' })
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    const sql = `
+      UPDATE monitoring_parameters
+      SET
+        cycle_end_date = $1,
+        total_fry_produced = COALESCE($2, total_fry_produced),
+        harvest_date = $1,
+        notes = COALESCE($3, notes),
+        updated_at = NOW()
+      WHERE cycle_id = $4 AND cycle_end_date IS NULL
+      RETURNING *
+    `
+
+    const result = await query(sql, [
+      today,
+      totalFryProduced ? parseInt(totalFryProduced) : null,
+      notes || null,
+      cycleId,
+    ])
+
+    res.json({
+      message: `Ended cycle ${cycleId}, updated ${result.rowCount} records`,
+      data: result.rows.map(mapRow),
+    })
   } catch (error) {
     next(error)
   }
@@ -312,25 +339,7 @@ export const getLatestParameters = async (req, res, next) => {
     
     const row = result.rows[0]
     res.json({
-      data: {
-        id: row.id,
-        cycleId: row.cycle_id,
-        cycleStartDate: row.cycle_start_date,
-        waterTemperature: row.water_temperature ? Number(row.water_temperature) : null,
-        dissolvedOxygen: row.dissolved_oxygen ? Number(row.dissolved_oxygen) : null,
-        phLevel: row.ph_level ? Number(row.ph_level) : null,
-        numberOfBreeders: row.number_of_breeders,
-        breederRatio: row.breeder_ratio,
-        feedAllocation: row.feed_allocation ? Number(row.feed_allocation) : null,
-        weatherTemperature: row.weather_temperature ? Number(row.weather_temperature) : null,
-        weatherHumidity: row.weather_humidity,
-        weatherCondition: row.weather_condition,
-        weatherWindSpeed: row.weather_wind_speed ? Number(row.weather_wind_speed) : null,
-        recordedAt: row.recorded_at,
-        notes: row.notes,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      },
+      data: mapRow(row),
     })
   } catch (error) {
     next(error)

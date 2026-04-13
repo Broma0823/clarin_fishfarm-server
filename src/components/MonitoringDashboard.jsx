@@ -1,6 +1,6 @@
 // This file contains the monitoring dashboard component
 // It will be integrated into App.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // Helper function to check parameter status
 const getParameterStatus = (value, min, max) => {
@@ -293,16 +293,38 @@ export const MonitoringDashboardContent = ({
   deviceReadings,
   loadingDeviceReadings,
   onViewCycleSummary,
+  lastDeviceReadingTime,
 }) => {
-  // Get current time
-  const now = new Date()
+  const [currentTimeState, setCurrentTimeState] = useState(new Date())
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTimeState(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const now = currentTimeState
   const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   const currentDate = now.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
 
-  // Calculate next data collection time (every 30 seconds, so next is 30 seconds from now)
-  const nextCollection = new Date(now.getTime() + 30000)
-  const nextTime = nextCollection.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  const nextDate = nextCollection.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  // ESP32 is considered offline if no reading exists or last reading is older than 30 seconds
+  const ESP32_TIMEOUT_MS = 30000
+  const esp32Connected = (() => {
+    if (!lastDeviceReadingTime || !deviceReadings) return false
+    const ageMs = now.getTime() - new Date(lastDeviceReadingTime).getTime()
+    return ageMs < ESP32_TIMEOUT_MS
+  })()
+
+  const timeSinceLastReading = (() => {
+    if (!lastDeviceReadingTime) return null
+    const ageMs = now.getTime() - new Date(lastDeviceReadingTime).getTime()
+    if (ageMs < 60000) return `${Math.floor(ageMs / 1000)}s ago`
+    if (ageMs < 3600000) return `${Math.floor(ageMs / 60000)}m ago`
+    return `${Math.floor(ageMs / 3600000)}h ago`
+  })()
+
+  const nextCollection = esp32Connected ? new Date(now.getTime() + 10000) : null
+  const nextTime = nextCollection ? nextCollection.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const nextDate = nextCollection ? nextCollection.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
 
   // Filter parameters by cycle ID
   const filteredParameters = currentCycleId
@@ -316,9 +338,6 @@ export const MonitoringDashboardContent = ({
           <h2 style={{ margin: 0, fontSize: '1.75rem', fontWeight: '700', color: '#1a202c' }}>
             Monitoring Dashboard
           </h2>
-          <p style={{ margin: '0.5rem 0 0 0', color: '#64748b', fontSize: '0.875rem' }}>
-            Real-time water quality monitoring for tilapia farming
-          </p>
         </div>
         <div className="panel-actions" style={{ display: 'flex', gap: '0.75rem' }}>
           <button
@@ -327,6 +346,7 @@ export const MonitoringDashboardContent = ({
               setNewMonitoringRecord({
                 cycleId: currentCycleId || '',
                 cycleStartDate: '',
+                cycleEndDate: '',
                 waterTemperature: '',
                 dissolvedOxygen: '',
                 phLevel: '',
@@ -413,40 +433,78 @@ export const MonitoringDashboardContent = ({
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* ESP32 Connection Status */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
             gap: '0.75rem',
             padding: '0.75rem 1.25rem',
-            background: loadingDeviceReadings ? 'linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%)' : 'linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%)',
+            background: esp32Connected
+              ? 'linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%)'
+              : 'linear-gradient(135deg, #fde8e8 0%, #fecaca 100%)',
             borderRadius: '10px',
-            border: `1px solid ${loadingDeviceReadings ? '#ffc107' : '#28a745'}40`,
-            boxShadow: `0 2px 4px ${loadingDeviceReadings ? '#ffc107' : '#28a745'}20`
+            border: `1px solid ${esp32Connected ? '#28a745' : '#ef4444'}40`,
+            boxShadow: `0 2px 4px ${esp32Connected ? '#28a745' : '#ef4444'}20`
           }}>
             <div style={{
               width: '10px',
               height: '10px',
               borderRadius: '50%',
-              background: loadingDeviceReadings ? '#ffc107' : '#28a745',
-              boxShadow: `0 0 12px ${loadingDeviceReadings ? '#ffc107' : '#28a745'}80`,
-              animation: loadingDeviceReadings ? 'pulse 1.5s ease-in-out infinite' : 'none'
+              background: esp32Connected ? '#28a745' : '#ef4444',
+              boxShadow: `0 0 12px ${esp32Connected ? '#28a745' : '#ef4444'}80`,
+              animation: esp32Connected ? 'pulse 1.5s ease-in-out infinite' : 'none'
             }}></div>
             <div>
               <span style={{
                 fontSize: '0.875rem',
                 fontWeight: '700',
-                color: loadingDeviceReadings ? '#856404' : '#155724',
+                color: esp32Connected ? '#155724' : '#991b1b',
+                display: 'block'
+              }}>
+                {esp32Connected ? 'ESP32 Connected' : 'ESP32 Disconnected'}
+              </span>
+              <span style={{
+                fontSize: '0.7rem',
+                color: esp32Connected ? '#155724' : '#991b1b',
+                opacity: 0.8
+              }}>
+                {esp32Connected
+                  ? `Last reading: ${timeSinceLastReading}`
+                  : timeSinceLastReading
+                    ? `Last seen: ${timeSinceLastReading}`
+                    : 'No data received'}
+              </span>
+            </div>
+          </div>
+
+          {/* System Status */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.75rem 1.25rem',
+            background: loadingDeviceReadings
+              ? 'linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%)'
+              : 'linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)',
+            borderRadius: '10px',
+            border: `1px solid ${loadingDeviceReadings ? '#ffc107' : '#0284c7'}40`
+          }}>
+            <div>
+              <span style={{
+                fontSize: '0.875rem',
+                fontWeight: '700',
+                color: loadingDeviceReadings ? '#856404' : '#0c4a6e',
                 display: 'block'
               }}>
                 {loadingDeviceReadings ? 'Updating...' : 'System Active'}
               </span>
               <span style={{
                 fontSize: '0.7rem',
-                color: loadingDeviceReadings ? '#856404' : '#155724',
+                color: loadingDeviceReadings ? '#856404' : '#0c4a6e',
                 opacity: 0.8
               }}>
-                {loadingDeviceReadings ? 'Collecting new data' : 'Monitoring in progress'}
+                {loadingDeviceReadings ? 'Polling sensor data' : 'Monitoring in progress'}
               </span>
             </div>
           </div>
@@ -454,97 +512,134 @@ export const MonitoringDashboardContent = ({
       </div>
 
       {/* Water Quality Parameters - Auto-collected with Visual Gauges */}
-      {deviceReadings && (
-        <div style={{ marginBottom: '2rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '1.5rem'
-          }}>
-            <div>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                color: '#1a202c',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem'
+      <div style={{ marginBottom: '2rem' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '1.5rem'
+        }}>
+          <div>
+            <h3 style={{
+              margin: 0,
+              fontSize: '1.5rem',
+              fontWeight: '700',
+              color: '#1a202c',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}>
+              Water Quality Parameters
+              <span style={{
+                fontSize: '0.75rem',
+                backgroundColor: esp32Connected ? '#4CAF50' : '#ef4444',
+                color: 'white',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '20px',
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
               }}>
-                Water Quality Parameters
-                <span style={{
-                  fontSize: '0.75rem',
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  padding: '0.25rem 0.75rem',
-                  borderRadius: '20px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Auto-Collected
-                </span>
-              </h3>
-              {deviceReadings.timestamp && (
-                <p style={{
-                  margin: '0.5rem 0 0 0',
-                  fontSize: '0.875rem',
-                  color: '#64748b'
-                }}>
-                  Last updated: {new Date(deviceReadings.timestamp).toLocaleString()}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '1.5rem'
-          }}>
-            {/* Water Temperature Gauge */}
-            <ParameterGauge
-              label="Water Temperature"
-              value={deviceReadings.waterTemperature}
-              unit="°C"
-              min={20}
-              max={35}
-              optimalMin={26}
-              optimalMax={30}
-              color="#ef4444"
-              description="Temperature of pond water"
-              tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 26-30°C. Too cold slows growth, too hot reduces oxygen levels."
-            />
-            {/* pH Level Gauge */}
-            <ParameterGauge
-              label="pH Level"
-              value={deviceReadings.phLevel}
-              unit=""
-              min={4}
-              max={10}
-              optimalMin={6.5}
-              optimalMax={8.5}
-              color="#8b5cf6"
-              description="Acidity/alkalinity of pond water"
-              tooltip="pH measures how acidic or alkaline the water is. Tilapia thrive in pH 6.5–8.5. Low pH stresses fish and reduces appetite; high pH can cause ammonia toxicity."
-            />
-            {/* Dissolved Oxygen Gauge */}
-            <ParameterGauge
-              label="Dissolved Oxygen"
-              value={deviceReadings.dissolvedOxygen}
-              unit="V"
-              min={0}
-              max={3.5}
-              optimalMin={0.5}
-              optimalMax={3.0}
-              color="#06b6d4"
-              description="Raw sensor voltage (uncalibrated)"
-              tooltip="Dissolved oxygen sensor is currently uncalibrated — displaying raw estimated module voltage. Once calibrated with fill solution, this will show mg/L values."
-            />
+                {esp32Connected ? 'Auto-Collected' : 'Sensor Offline'}
+              </span>
+            </h3>
+            {deviceReadings?.timestamp ? (
+              <p style={{
+                margin: '0.5rem 0 0 0',
+                fontSize: '0.875rem',
+                color: esp32Connected ? '#64748b' : '#ef4444'
+              }}>
+                Last updated: {new Date(deviceReadings.timestamp).toLocaleString()}
+                {!esp32Connected && ` (${timeSinceLastReading})`}
+              </p>
+            ) : (
+              <p style={{
+                margin: '0.5rem 0 0 0',
+                fontSize: '0.875rem',
+                color: '#ef4444'
+              }}>
+                No sensor data received — connect and power on the ESP32
+              </p>
+            )}
           </div>
         </div>
-      )}
+
+        {/* Offline banner */}
+        {!esp32Connected && (
+          <div style={{
+            padding: '1rem 1.25rem',
+            background: 'linear-gradient(135deg, #fef2f2 0%, #fde8e8 100%)',
+            borderRadius: '12px',
+            border: '1px solid #fecaca',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem'
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <div>
+              <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: '#991b1b' }}>
+                ESP32 sensor device is not connected
+              </p>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#b91c1c' }}>
+                Ensure the ESP32 is powered on, connected to WiFi, and sending data to the server.
+                {deviceReadings && ' Showing last known readings below.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '1.5rem',
+          opacity: esp32Connected ? 1 : 0.6
+        }}>
+          {/* Water Temperature Gauge */}
+          <ParameterGauge
+            label="Water Temperature"
+            value={deviceReadings?.waterTemperature ?? null}
+            unit="°C"
+            min={20}
+            max={35}
+            optimalMin={26}
+            optimalMax={30}
+            color="#ef4444"
+            description="Temperature of pond water"
+            tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 26-30°C. Too cold slows growth, too hot reduces oxygen levels."
+          />
+          {/* pH Level Gauge */}
+          <ParameterGauge
+            label="pH Level"
+            value={deviceReadings?.phLevel ?? null}
+            unit=""
+            min={4}
+            max={10}
+            optimalMin={6.5}
+            optimalMax={8.5}
+            color="#8b5cf6"
+            description="Acidity/alkalinity of pond water"
+            tooltip="pH measures how acidic or alkaline the water is. Tilapia thrive in pH 6.5–8.5. Low pH stresses fish and reduces appetite; high pH can cause ammonia toxicity."
+          />
+          {/* Dissolved Oxygen Gauge */}
+          <ParameterGauge
+            label="Dissolved Oxygen"
+            value={deviceReadings?.dissolvedOxygen ?? null}
+            unit="V"
+            min={0}
+            max={3.5}
+            optimalMin={0.5}
+            optimalMax={3.0}
+            color="#06b6d4"
+            description="Raw sensor voltage (uncalibrated)"
+            tooltip="Dissolved oxygen sensor is currently uncalibrated — displaying raw estimated module voltage. Once calibrated with fill solution, this will show mg/L values."
+          />
+        </div>
+      </div>
 
       {/* Weather Information */}
       {weatherData && (
@@ -638,7 +733,10 @@ export const MonitoringDashboardContent = ({
       )}
 
       {/* Latest User-Inputted Parameters Display */}
-      {monitoringParameters.length > 0 && (
+      {(() => {
+        const breedingRecord = monitoringParameters.find(p => p.numberOfBreeders || p.breederRatio || p.feedAllocation)
+        return breedingRecord
+      })() && (
         <div style={{
           background: 'white',
           borderRadius: '12px',
@@ -680,9 +778,14 @@ export const MonitoringDashboardContent = ({
               <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
                 Number of Breeders
               </p>
-              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
-                {monitoringParameters[0]?.numberOfBreeders || '—'}
-              </p>
+              {(() => {
+                const br = monitoringParameters.find(p => p.numberOfBreeders || p.breederRatio || p.feedAllocation)
+                return (
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
+                    {br?.numberOfBreeders || '—'}
+                  </p>
+                )
+              })()}
             </div>
             <div style={{
               padding: '1rem',
@@ -692,9 +795,14 @@ export const MonitoringDashboardContent = ({
               <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
                 Breeder Ratio
               </p>
-              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
-                {monitoringParameters[0]?.breederRatio || '—'}
-              </p>
+              {(() => {
+                const br = monitoringParameters.find(p => p.numberOfBreeders || p.breederRatio || p.feedAllocation)
+                return (
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
+                    {br?.breederRatio || '—'}
+                  </p>
+                )
+              })()}
             </div>
             <div style={{
               padding: '1rem',
@@ -704,165 +812,19 @@ export const MonitoringDashboardContent = ({
               <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
                 Feed Allocation
               </p>
-              <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
-                {monitoringParameters[0]?.feedAllocation?.toFixed(2) || '—'} kg
-              </p>
+              {(() => {
+                const br = monitoringParameters.find(p => p.numberOfBreeders || p.breederRatio || p.feedAllocation)
+                return (
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
+                    {br?.feedAllocation ? `${Number(br.feedAllocation).toFixed(2)}` : '—'} kg
+                  </p>
+                )
+              })()}
             </div>
           </div>
         </div>
       )}
 
-      {/* Filter by Cycle */}
-      <div style={{
-        background: 'white',
-        borderRadius: '12px',
-        padding: '1rem 1.5rem',
-        marginBottom: '1.5rem',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-      }}>
-        <label style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem',
-          fontSize: '0.875rem',
-          fontWeight: '500',
-          color: '#64748b'
-        }}>
-          <span style={{ minWidth: '120px' }}>Filter by Cycle ID:</span>
-          <input
-            type="text"
-            value={currentCycleId}
-            onChange={(e) => setCurrentCycleId(e.target.value)}
-            placeholder="Enter cycle ID (e.g., CYCLE-2025-001) or leave empty to see all records"
-            style={{
-              flex: 1,
-              maxWidth: '400px',
-              padding: '0.625rem 1rem',
-              border: '1px solid #e5e7eb',
-              borderRadius: '8px',
-              fontSize: '0.875rem',
-              transition: 'all 0.2s ease'
-            }}
-            onFocus={(e) => e.target.style.borderColor = '#1A3D64'}
-            onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-          />
-          {currentCycleId && (
-            <button
-              onClick={() => setCurrentCycleId('')}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#f1f5f9',
-                border: '1px solid #e5e7eb',
-                borderRadius: '8px',
-                fontSize: '0.875rem',
-                color: '#64748b',
-                cursor: 'pointer',
-                fontWeight: '500'
-              }}
-            >
-              Clear Filter
-            </button>
-          )}
-        </label>
-      </div>
-
-      {/* Monitoring Parameters Table */}
-      <div style={{
-        background: 'white',
-        borderRadius: '12px',
-        padding: '1.5rem',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-      }}>
-        <div style={{
-          marginBottom: '1rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: '1rem'
-        }}>
-          <div>
-            <h3 style={{
-              margin: 0,
-              fontSize: '1.25rem',
-              fontWeight: '600',
-              color: '#1a202c',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              Monitoring Parameters History
-              <InfoIcon tooltip="View all recorded monitoring data. Water quality parameters are auto-collected from the device, while breeding parameters are manually entered." />
-            </h3>
-            <p style={{
-              margin: '0.5rem 0 0 0',
-              fontSize: '0.875rem',
-              color: '#64748b'
-            }}>
-              Complete record of all monitoring data collected over time
-            </p>
-          </div>
-        </div>
-        {loadingMonitoring ? (
-          <p style={{ color: '#64748b', textAlign: 'center', padding: '2rem' }}>
-            Loading monitoring parameters...
-          </p>
-        ) : monitoringParameters.length > 0 ? (
-          <div className="table-wrapper">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Cycle ID</th>
-                  <th>Cycle Start</th>
-                  <th>Water Temp (°C)</th>
-                  <th>DO (mg/L)</th>
-                  <th>pH</th>
-                  <th>Breeders</th>
-                  <th>Ratio</th>
-                  <th>Feed (kg)</th>
-                  <th>Recorded At</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monitoringParameters.map((param) => (
-                  <tr key={param.id}>
-                    <td>{param.cycleId}</td>
-                    <td>{param.cycleStartDate ? formatDate(param.cycleStartDate) : '—'}</td>
-                    <td>{param.waterTemperature?.toFixed(1) || '—'}</td>
-                    <td>{param.dissolvedOxygen?.toFixed(2) || '—'}</td>
-                    <td>{param.phLevel?.toFixed(2) || '—'}</td>
-                    <td>{param.numberOfBreeders || '—'}</td>
-                    <td>{param.breederRatio || '—'}</td>
-                    <td>{param.feedAllocation?.toFixed(2) || '—'}</td>
-                    <td>{param.recordedAt ? formatDate(param.recordedAt) : '—'}</td>
-                    <td>
-                      <button
-                        className="action-button"
-                        onClick={() => handleEditMonitoringRecord(param)}
-                        title="Edit"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="action-button delete-button"
-                        onClick={() => handleDeleteMonitoringRecord(param.id)}
-                        title="Delete"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p style={{ color: '#64748b', textAlign: 'center', padding: '2rem' }}>
-            No monitoring parameters recorded yet. Click "Enter Production Parameters" to add your first record.
-          </p>
-        )}
-      </div>
 
       {/* Add/Edit Modal */}
       {showMonitoringModal && (

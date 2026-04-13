@@ -142,8 +142,9 @@ function App() {
   const [currentCycleId, setCurrentCycleId] = useState('')
   const [weatherData, setWeatherData] = useState(null)
   const [loadingWeather, setLoadingWeather] = useState(false)
-  const [deviceReadings, setDeviceReadings] = useState(null) // Auto-collected water quality parameters
+  const [deviceReadings, setDeviceReadings] = useState(null)
   const [loadingDeviceReadings, setLoadingDeviceReadings] = useState(false)
+  const [lastDeviceReadingTime, setLastDeviceReadingTime] = useState(null)
 
   // Cycle Summary State
   const [showCycleSummary, setShowCycleSummary] = useState(false)
@@ -154,6 +155,7 @@ function App() {
   const [newMonitoringRecord, setNewMonitoringRecord] = useState({
     cycleId: '',
     cycleStartDate: '',
+    cycleEndDate: '',
     waterTemperature: '',
     dissolvedOxygen: '',
     phLevel: '',
@@ -634,6 +636,8 @@ function App() {
           return
         }
 
+        const readingTime = latest.recordedAt ? new Date(latest.recordedAt) : null
+        setLastDeviceReadingTime(readingTime)
         setDeviceReadings({
           waterTemperature: latest.waterTemperature ?? null,
           dissolvedOxygen: latest.dissolvedOxygen ?? null,
@@ -667,9 +671,10 @@ function App() {
       const recordData = {
         cycleId: newMonitoringRecord.cycleId || `CYCLE-${Date.now()}`,
         cycleStartDate: newMonitoringRecord.cycleStartDate,
-        waterTemperature: deviceReadings?.waterTemperature || null, // Auto-collected from device
-        dissolvedOxygen: deviceReadings?.dissolvedOxygen || null, // Auto-collected from device
-        phLevel: deviceReadings?.phLevel || null, // Auto-collected from device
+        cycleEndDate: newMonitoringRecord.cycleEndDate || null,
+        waterTemperature: deviceReadings?.waterTemperature || null,
+        dissolvedOxygen: deviceReadings?.dissolvedOxygen || null,
+        phLevel: deviceReadings?.phLevel || null,
         numberOfBreeders: newMonitoringRecord.numberOfBreeders ? Number(newMonitoringRecord.numberOfBreeders) : null,
         breederRatio: newMonitoringRecord.breederRatio || null,
         feedAllocation: newMonitoringRecord.feedAllocation ? Number(newMonitoringRecord.feedAllocation) : null,
@@ -730,9 +735,10 @@ function App() {
     setNewMonitoringRecord({
       cycleId: record.cycleId,
       cycleStartDate: record.cycleStartDate,
-      waterTemperature: '', // Not editable - auto-collected
-      dissolvedOxygen: '', // Not editable - auto-collected
-      phLevel: '', // Not editable - auto-collected
+      cycleEndDate: record.cycleEndDate || '',
+      waterTemperature: '',
+      dissolvedOxygen: '',
+      phLevel: '',
       numberOfBreeders: record.numberOfBreeders?.toString() || '',
       breederRatio: record.breederRatio || '',
       feedAllocation: record.feedAllocation?.toString() || '',
@@ -751,9 +757,10 @@ function App() {
       const recordData = {
         cycleId: newMonitoringRecord.cycleId,
         cycleStartDate: newMonitoringRecord.cycleStartDate,
-        waterTemperature: editingMonitoring.waterTemperature || deviceReadings?.waterTemperature || null, // Keep existing or use current device reading
-        dissolvedOxygen: editingMonitoring.dissolvedOxygen || deviceReadings?.dissolvedOxygen || null, // Keep existing or use current device reading
-        phLevel: editingMonitoring.phLevel || deviceReadings?.phLevel || null, // Keep existing or use current device reading
+        cycleEndDate: newMonitoringRecord.cycleEndDate || null,
+        waterTemperature: editingMonitoring.waterTemperature || deviceReadings?.waterTemperature || null,
+        dissolvedOxygen: editingMonitoring.dissolvedOxygen || deviceReadings?.dissolvedOxygen || null,
+        phLevel: editingMonitoring.phLevel || deviceReadings?.phLevel || null,
         numberOfBreeders: newMonitoringRecord.numberOfBreeders ? Number(newMonitoringRecord.numberOfBreeders) : null,
         breederRatio: newMonitoringRecord.breederRatio || null,
         feedAllocation: newMonitoringRecord.feedAllocation ? Number(newMonitoringRecord.feedAllocation) : null,
@@ -1396,6 +1403,7 @@ function App() {
             formatDate={formatDate}
             deviceReadings={deviceReadings}
             loadingDeviceReadings={loadingDeviceReadings}
+            lastDeviceReadingTime={lastDeviceReadingTime}
             onViewCycleSummary={(cycleId) => {
               if (cycleId === 'all') {
                 setShowCyclesList(true)
