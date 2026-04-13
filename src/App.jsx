@@ -571,45 +571,38 @@ function App() {
     const fetchWeather = async () => {
       setLoadingWeather(true)
       try {
-        // Using OpenWeatherMap API (free tier)
-        // Note: You'll need to get an API key from openweathermap.org
-        // For now, using a mock/demo approach
-        const API_KEY = import.meta.env.VITE_WEATHER_API_KEY || ''
-        // Clarin, Bohol coordinates approximately: 9.95°N, 123.95°E
-        const lat = 9.95
-        const lon = 123.95
-
-        if (API_KEY) {
-          const response = await fetch(
-            `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
-          )
-          if (response.ok) {
-            const data = await response.json()
-            setWeatherData({
-              temperature: data.main.temp,
-              humidity: data.main.humidity,
-              condition: data.weather[0].main,
-              windSpeed: data.wind?.speed || 0,
-            })
-          }
-        } else {
-          // Mock data for development
+        // Open-Meteo — free, no API key required
+        // Caluwasan, Clarin, Bohol coordinates
+        const lat = 9.9489
+        const lon = 124.0711
+        const response = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Asia%2FManila`
+        )
+        if (response.ok) {
+          const data = await response.json()
+          const c = data.current
+          const wmoCode = c.weather_code ?? 0
+          const condition =
+            wmoCode === 0 ? 'Clear'
+            : wmoCode <= 3 ? 'Partly Cloudy'
+            : wmoCode <= 48 ? 'Foggy'
+            : wmoCode <= 67 ? 'Rainy'
+            : wmoCode <= 77 ? 'Snowy'
+            : wmoCode <= 82 ? 'Showers'
+            : 'Stormy'
           setWeatherData({
-            temperature: 28.5,
-            humidity: 75,
-            condition: 'Clear',
-            windSpeed: 12.5,
+            temperature: c.temperature_2m,
+            humidity: c.relative_humidity_2m,
+            condition,
+            windSpeed: c.wind_speed_10m,
           })
+        } else {
+          console.warn('Open-Meteo returned', response.status)
+          setWeatherData({ temperature: 28.5, humidity: 75, condition: 'Unavailable', windSpeed: 0 })
         }
       } catch (err) {
         console.error('Failed to fetch weather:', err)
-        // Set mock data on error
-        setWeatherData({
-          temperature: 28.5,
-          humidity: 75,
-          condition: 'Clear',
-          windSpeed: 12.5,
-        })
+        setWeatherData({ temperature: 28.5, humidity: 75, condition: 'Offline', windSpeed: 0 })
       } finally {
         setLoadingWeather(false)
       }
