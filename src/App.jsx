@@ -649,8 +649,7 @@ function App() {
     }
 
     fetchDeviceReadings()
-    // Refresh device readings every 30 seconds (typical for monitoring devices)
-    const interval = setInterval(fetchDeviceReadings, 30000)
+    const interval = setInterval(fetchDeviceReadings, 5000)
     return () => clearInterval(interval)
   }, [user, activePanel])
 

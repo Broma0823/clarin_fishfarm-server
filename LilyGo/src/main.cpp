@@ -60,7 +60,7 @@ static unsigned long wifiReconnectBackoffMs()
 const char *CYCLE_ID = "CYCLE-2026-01";
 const char *CYCLE_START_DATE = "2026-04-07";
 
-const unsigned long SAMPLE_INTERVAL_MS = 60000UL; // 1 minute between POSTs
+const unsigned long SAMPLE_INTERVAL_MS = 10000UL; // 10 seconds between POSTs
 unsigned long lastSampleMs = 0;
 
 /** Sensor / WiFi status lines on the monitor — independent of upload interval. */
@@ -75,6 +75,22 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 static bool gDs18b20Ready = false;
 
+// --- pH sensor (analog via voltage divider) ---
+static const int PH_ADC_PIN = 34;
+static const float ADC_VREF = 3.3f;
+static const float ADC_MAX = 4095.0f;
+static const float R_DIV_TOP_OHMS = 2200.0f;
+static const float R_DIV_BOTTOM_OHMS = 3000.0f;
+static const float DIVIDER_SCALE =
+    (R_DIV_TOP_OHMS + R_DIV_BOTTOM_OHMS) / R_DIV_BOTTOM_OHMS;
+static float phCalibrationValue = 24.05f - 1.05f;
+
+struct TxJob
+{
+  float tempC;
+  float phLevel;
+};
+
 struct TxResult
 {
   int httpStatus;
@@ -85,8 +101,38 @@ struct TxResult
 static QueueHandle_t txJobQueue = nullptr;
 static QueueHandle_t txResultQueue = nullptr;
 
+/** Read pH from analog pin: 10 samples, sort, average middle 6, apply divider + calibration. */
+static float readPhLevel()
+{
+  int buf[10];
+  for (int i = 0; i < 10; i++)
+  {
+    buf[i] = analogRead(PH_ADC_PIN);
+    delay(30);
+  }
+
+  for (int i = 0; i < 9; i++)
+    for (int j = i + 1; j < 10; j++)
+      if (buf[i] > buf[j])
+      {
+        int tmp = buf[i];
+        buf[i] = buf[j];
+        buf[j] = tmp;
+      }
+
+  unsigned long avgval = 0;
+  for (int i = 2; i < 8; i++)
+    avgval += buf[i];
+
+  const float voltAtPin = (float)avgval * (ADC_VREF / ADC_MAX) / 6.0f;
+  const float voltModule = voltAtPin * DIVIDER_SCALE;
+  const float ph = -5.70f * voltModule + phCalibrationValue;
+
+  return ph;
+}
+
 /** HTTP only — no Serial; safe to call from the TX worker task. */
-static void runTemperatureHttpPost(float tempC, TxResult *out)
+static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
 {
   std::memset(out, 0, sizeof(*out));
   out->httpStatus = -1;
@@ -107,7 +153,8 @@ static void runTemperatureHttpPost(float tempC, TxResult *out)
   String body = "{";
   body += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
   body += "\"cycleStartDate\":\"" + String(CYCLE_START_DATE) + "\",";
-  body += "\"waterTemperature\":" + String(tempC, 2);
+  body += "\"waterTemperature\":" + String(job.tempC, 2) + ",";
+  body += "\"phLevel\":" + String(job.phLevel, 2);
   body += "}";
 
   const int status = http.POST(body);
@@ -131,13 +178,13 @@ static void runTemperatureHttpPost(float tempC, TxResult *out)
 
 static void transmitWorker(void *)
 {
-  float tempC;
+  TxJob job;
   TxResult r;
   for (;;)
   {
-    if (xQueueReceive(txJobQueue, &tempC, portMAX_DELAY) != pdTRUE)
+    if (xQueueReceive(txJobQueue, &job, portMAX_DELAY) != pdTRUE)
       continue;
-    runTemperatureHttpPost(tempC, &r);
+    runMonitoringHttpPost(job, &r);
     (void)xQueueSend(txResultQueue, &r, portMAX_DELAY);
   }
 }
@@ -342,11 +389,13 @@ void setup(void)
   Serial.begin(115200);
   Serial.setTxBufferSize(2048);
   delay(200);
-  DBG_PRINTLN("Dallas Temperature IC Control Library Demo");
+  DBG_PRINTLN("Fishfarm Monitoring: Temperature + pH");
   DBG_PRINT("API URL: ");
   DBG_PRINTLN(FISHFARM_API_URL);
 
-  txJobQueue = xQueueCreate(2, sizeof(float));
+  analogSetPinAttenuation(PH_ADC_PIN, ADC_11db);
+
+  txJobQueue = xQueueCreate(2, sizeof(TxJob));
   txResultQueue = xQueueCreate(4, sizeof(TxResult));
   if (txJobQueue && txResultQueue)
   {
@@ -433,25 +482,26 @@ void loop(void)
     printWifiStatus();
   }
 
+  sensors.requestTemperatures();
+  yield();
+
+  const float tempC = sensors.getTempC(insideThermometer);
+  const float phValue = readPhLevel();
+
   if (doDebugPrint)
   {
-    DBG_PRINT("Requesting temperatures...");
-    sensors.requestTemperatures();
-    yield();
-    DBG_PRINTLN("DONE");
-    printTemperature(insideThermometer);
+    if (tempC == DEVICE_DISCONNECTED_C)
+      DBG_PRINTLN("Temp: (disconnected)");
+    else
+      DBG_PRINTF("Temp: %.2f C  (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
+
+    DBG_PRINTF("pH: %.2f\n", phValue);
     lastDebugPrintMs = nowMs;
-  }
-  else
-  {
-    sensors.requestTemperatures();
-    yield();
   }
 
   if (!doUpload)
     return;
 
-  const float tempC = sensors.getTempC(insideThermometer);
   if (tempC == DEVICE_DISCONNECTED_C)
   {
     DBG_PRINTLN("Upload skipped: DS18B20 disconnected");
@@ -459,7 +509,8 @@ void loop(void)
     return;
   }
 
-  if (xQueueSend(txJobQueue, &tempC, 0) != pdTRUE)
+  TxJob job = {tempC, phValue};
+  if (xQueueSend(txJobQueue, &job, 0) != pdTRUE)
   {
     DBG_PRINTLN("[DBG] TX queue full (POST still running); will retry.");
     return;

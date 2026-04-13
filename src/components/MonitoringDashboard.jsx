@@ -500,7 +500,7 @@ export const MonitoringDashboardContent = ({
 
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(300px, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
             gap: '1.5rem'
           }}>
             {/* Water Temperature Gauge */}
@@ -515,6 +515,19 @@ export const MonitoringDashboardContent = ({
               color="#ef4444"
               description="Temperature of pond water"
               tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 26-30°C. Too cold slows growth, too hot reduces oxygen levels."
+            />
+            {/* pH Level Gauge */}
+            <ParameterGauge
+              label="pH Level"
+              value={deviceReadings.phLevel}
+              unit=""
+              min={4}
+              max={10}
+              optimalMin={6.5}
+              optimalMax={8.5}
+              color="#8b5cf6"
+              description="Acidity/alkalinity of pond water"
+              tooltip="pH measures how acidic or alkaline the water is. Tilapia thrive in pH 6.5–8.5. Low pH stresses fish and reduces appetite; high pH can cause ammonia toxicity."
             />
           </div>
         </div>
