@@ -71,19 +71,54 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 static bool gDs18b20Ready = false;
 
+// ESP32 ADC1 @ ADC_11db: ~0–3.3 V full scale, 12-bit (0–4095). pH uses GPIO34, DO uses GPIO35.
+// pH keeps the original 2k2/3k divider. DO is currently wired DIRECT (no divider): module V == pin V.
 static const int PH_ADC_PIN = 34;
 static const int DO_ADC_PIN = 35;
 static const float ADC_VREF = 3.3f;
 static const float ADC_MAX = 4095.0f;
-static const float R_DIV_TOP_OHMS = 2200.0f;
-static const float R_DIV_BOTTOM_OHMS = 3000.0f;
-static const float DIVIDER_SCALE =
-    (R_DIV_TOP_OHMS + R_DIV_BOTTOM_OHMS) / R_DIV_BOTTOM_OHMS;
-static const float DO_R_DIV_TOP_OHMS = 2200.0f;
-static const float DO_R_DIV_BOTTOM_OHMS = 3000.0f;
+static const float PH_R_DIV_TOP_OHMS = 2200.0f;
+static const float PH_R_DIV_BOTTOM_OHMS = 3000.0f;
+static const float PH_DIVIDER_SCALE =
+    (PH_R_DIV_TOP_OHMS + PH_R_DIV_BOTTOM_OHMS) / PH_R_DIV_BOTTOM_OHMS;
+static const float DO_R_DIV_TOP_OHMS = 0.0f;
+static const float DO_R_DIV_BOTTOM_OHMS = 1.0f;
 static const float DO_DIVIDER_SCALE =
     (DO_R_DIV_TOP_OHMS + DO_R_DIV_BOTTOM_OHMS) / DO_R_DIV_BOTTOM_OHMS;
 static float phCalibrationValue = 24.05f - 1.05f;
+
+// Dissolved oxygen (DO) calibration (ported from common Arduino samples, adapted for ESP32).
+// The DO algorithm expects the *sensor module output voltage* in millivolts (mv), and a temperature in °C (0–40).
+// We estimate module voltage from the ADC pin voltage using the same divider scale.
+#ifndef DO_TWO_POINT_CALIBRATION
+#define DO_TWO_POINT_CALIBRATION 0
+#endif
+
+#ifndef DO_CAL1_V_MV
+// Set this to the stable module mV during SEN0237-A single-point calibration (wet probe, exposed to air).
+#define DO_CAL1_V_MV 736
+#endif
+#ifndef DO_CAL1_T_C
+#define DO_CAL1_T_C 26
+#endif
+
+#ifndef DO_CAL2_V_MV
+#define DO_CAL2_V_MV 1300
+#endif
+#ifndef DO_CAL2_T_C
+#define DO_CAL2_T_C 15
+#endif
+
+#ifndef DO_FALLBACK_TEMP_C
+// Used when DS18B20 is not available/valid.
+#define DO_FALLBACK_TEMP_C 25
+#endif
+
+static const uint16_t DO_TABLE_MG_L_X1000[41] = {
+    14460, 14220, 13820, 13440, 13090, 12740, 12420, 12110, 11810, 11530,
+    11260, 11010, 10770, 10530, 10300, 10080, 9860, 9660, 9460, 9270,
+    9080, 8900, 8730, 8570, 8410, 8250, 8110, 7960, 7820, 7690,
+    7560, 7430, 7300, 7180, 7070, 6950, 6840, 6730, 6630, 6530, 6410};
 
 struct DoReading
 {
@@ -94,6 +129,8 @@ struct DoReading
 
 static float readPhLevel(void);
 static DoReading readDoRaw(void);
+static uint16_t doComputeMgLx1000(uint32_t voltageModuleMv, uint8_t temperatureC);
+static float doComputeMgL(uint32_t voltageModuleMv, uint8_t temperatureC);
 
 struct TxJob
 {
@@ -103,6 +140,7 @@ struct TxJob
   uint32_t doRawAdc;
   float doVoltagePin;
   float doVoltageModuleEst;
+  float doMgL;
 };
 
 struct TxResult
@@ -164,6 +202,10 @@ static void handleStatusData(void)
 
   const float phValue = readPhLevel();
   const DoReading doReading = readDoRaw();
+  const uint8_t doTempC =
+      (uint8_t)((tempValid ? (int)lroundf(tempC) : (int)DO_FALLBACK_TEMP_C));
+  const uint32_t doModuleMv = (uint32_t)lroundf(doReading.voltageModuleEst * 1000.0f);
+  const float doMgL = doComputeMgL(doModuleMv, doTempC);
 
   char errEsc[128] = {0};
   jsonEscape(gLastUploadError, errEsc, sizeof(errEsc));
@@ -188,7 +230,11 @@ static void handleStatusData(void)
   json += "\"ph\":" + String(phValue, 2) + ",";
   json += "\"doRawAdc\":" + String((unsigned long)doReading.rawAdc) + ",";
   json += "\"doVoltagePinV\":" + String(doReading.voltagePin, 3) + ",";
+  json += "\"doVoltagePinMv\":" + String((long)(doReading.voltagePin * 1000.0f + 0.5f)) + ",";
   json += "\"doVoltageModuleEstV\":" + String(doReading.voltageModuleEst, 3) + ",";
+  json += "\"doVoltageModuleEstMv\":" + String((long)(doReading.voltageModuleEst * 1000.0f + 0.5f)) + ",";
+  json += "\"doTempC\":" + String((int)doTempC) + ",";
+  json += "\"doMgL\":" + String(doMgL, 3) + ",";
   json += "\"lastHttpStatus\":" + String(gLastHttpStatus) + ",";
   json += "\"lastUploadSuccess\":" + String(gLastUploadSuccess ? "true" : "false") + ",";
   json += "\"lastUploadResultMs\":" + String(gLastUploadResultMs) + ",";
@@ -224,7 +270,9 @@ static void handleStatusRoot(void)
       "if(j.rssi!==undefined)t+=r('RSSI (dBm)',j.rssi);if(j.mac)t+=r('MAC',j.mac);"
       "t+=r('API URL (Pi Wi‑Fi)',j.apiUrl);t+=r('Cycle',j.cycleId);t+=r('DS18B20 ready',j.ds18b20Ready);"
       "t+=r('Temp valid',j.tempValid);t+=r('Water °C',j.waterTemperatureC);t+=r('pH',j.ph);"
-      "t+=r('DO raw ADC',j.doRawAdc);t+=r('DO V @ pin',j.doVoltagePinV);t+=r('DO V @ module (est)',j.doVoltageModuleEstV);"
+      "t+=r('DO raw ADC (GPIO35)',j.doRawAdc);t+=r('DO V @ pin',j.doVoltagePinV);t+=r('DO mV @ pin',j.doVoltagePinMv);"
+      "t+=r('DO V @ module (est)',j.doVoltageModuleEstV);t+=r('DO mV @ module (est)',j.doVoltageModuleEstMv);"
+      "t+=r('DO temp (°C)',j.doTempC);t+=r('DO (mg/L)',j.doMgL);"
       "t+=r('Last HTTP status',j.lastHttpStatus);t+=r('Last upload OK',j.lastUploadSuccess);"
       "t+=r('Last upload error',j.lastUploadError||'—');"
       "document.querySelector('#tbl tbody').innerHTML=t;"
@@ -258,7 +306,7 @@ static float readPhLevel()
     avgval += buf[i];
 
   const float voltAtPin = (float)avgval * (ADC_VREF / ADC_MAX) / 6.0f;
-  const float voltModule = voltAtPin * DIVIDER_SCALE;
+  const float voltModule = voltAtPin * PH_DIVIDER_SCALE;
   return -5.70f * voltModule + phCalibrationValue;
 }
 
@@ -275,6 +323,34 @@ static DoReading readDoRaw()
   r.voltagePin = ((float)r.rawAdc * ADC_VREF) / ADC_MAX;
   r.voltageModuleEst = r.voltagePin * DO_DIVIDER_SCALE;
   return r;
+}
+
+static uint16_t doComputeMgLx1000(uint32_t voltageModuleMv, uint8_t temperatureC)
+{
+  if (temperatureC > 40)
+    temperatureC = 40;
+
+#if DO_TWO_POINT_CALIBRATION == 0
+  const uint32_t vSat =
+      (uint32_t)DO_CAL1_V_MV + (uint32_t)35U * (uint32_t)temperatureC - (uint32_t)DO_CAL1_T_C * 35U;
+#else
+  const int16_t vSat = (int16_t)((int8_t)temperatureC - (int16_t)DO_CAL2_T_C) *
+                           ((uint16_t)DO_CAL1_V_MV - (uint16_t)DO_CAL2_V_MV) /
+                           ((uint8_t)DO_CAL1_T_C - (uint8_t)DO_CAL2_T_C) +
+                       (int16_t)DO_CAL2_V_MV;
+#endif
+
+  const uint32_t vSatSafe = (vSat == 0) ? 1U : (uint32_t)vSat;
+  const uint32_t mgLx1000 =
+      (voltageModuleMv * (uint32_t)DO_TABLE_MG_L_X1000[temperatureC]) / vSatSafe;
+  if (mgLx1000 > 65535U)
+    return 65535U;
+  return (uint16_t)mgLx1000;
+}
+
+static float doComputeMgL(uint32_t voltageModuleMv, uint8_t temperatureC)
+{
+  return (float)doComputeMgLx1000(voltageModuleMv, temperatureC) / 1000.0f;
 }
 
 static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
@@ -303,7 +379,7 @@ static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
   else
     body += "\"waterTemperature\":null,";
   body += "\"phLevel\":" + String(job.phLevel, 2) + ",";
-  body += "\"dissolvedOxygen\":" + String(job.doVoltageModuleEst, 3);
+  body += "\"dissolvedOxygen\":" + String(job.doMgL, 3);
   body += "}";
 
   const int status = http.POST(body);
@@ -503,10 +579,17 @@ void setup(void)
   analogSetPinAttenuation(PH_ADC_PIN, ADC_11db);
   analogSetPinAttenuation(DO_ADC_PIN, ADC_11db);
 
-  DBG_PRINTF("[DIAG] GPIO%d raw ADC = %d (expect >0 if DO board wired)\n",
-             DO_ADC_PIN, analogRead(DO_ADC_PIN));
-  DBG_PRINTF("[DIAG] GPIO%d raw ADC = %d (pH pin for comparison)\n",
-             PH_ADC_PIN, analogRead(PH_ADC_PIN));
+  {
+    const int rawDo = analogRead(DO_ADC_PIN);
+    const float vPin = (float)rawDo * ADC_VREF / ADC_MAX;
+    const float vMod = vPin * DO_DIVIDER_SCALE;
+    DBG_PRINTF("[DIAG] DO GPIO%d cal snapshot: raw=%d pin=%.3fV (%ldmV) module(est)=%.3fV (%ldmV)\n",
+               DO_ADC_PIN, rawDo, vPin, (long)(vPin * 1000.0f + 0.5f), vMod,
+               (long)(vMod * 1000.0f + 0.5f));
+  }
+  DBG_PRINTF("[DIAG] pH GPIO%d raw ADC = %d (for comparison)\n", PH_ADC_PIN, analogRead(PH_ADC_PIN));
+  DBG_PRINTF("[DIAG] DO calibration: CAL1=%dmV@%dC  mode=%s\n",
+             (int)DO_CAL1_V_MV, (int)DO_CAL1_T_C, (DO_TWO_POINT_CALIBRATION ? "two-point" : "single-point"));
 
   txJobQueue = xQueueCreate(2, sizeof(TxJob));
   txResultQueue = xQueueCreate(4, sizeof(TxResult));
@@ -582,6 +665,10 @@ void loop(void)
 
   const float phValue = readPhLevel();
   const DoReading doReading = readDoRaw();
+  const uint8_t doTempC =
+      (uint8_t)((tempValid ? (int)lroundf(tempC) : (int)DO_FALLBACK_TEMP_C));
+  const uint32_t doModuleMv = (uint32_t)lroundf(doReading.voltageModuleEst * 1000.0f);
+  const float doMgL = doComputeMgL(doModuleMv, doTempC);
 
   if (doDebugPrint)
   {
@@ -592,15 +679,26 @@ void loop(void)
     else
       DBG_PRINTF("Temp: %.2f C (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
     DBG_PRINTF("pH: %.2f\n", phValue);
-    DBG_PRINTF("DO raw: %lu | DO V@pin: %.3f V | DO V@mod(est): %.3f V | UNCALIBRATED\n",
-               doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst);
+    DBG_PRINTF("DO sample -> raw:\t%lu\tVoltage(mV)\t%lu\n",
+               doReading.rawAdc,
+               (unsigned long)(doReading.voltagePin * 1000.0f + 0.5f));
+    DBG_PRINTF("DO GPIO%d: raw=%lu | pin=%.3fV (%lumV) | module(est)=%.3fV (%lumV) | "
+               "T=%uC | DO=%.3f mg/L (cal)\n",
+               DO_ADC_PIN,
+               doReading.rawAdc,
+               doReading.voltagePin,
+               (unsigned long)(doReading.voltagePin * 1000.0f + 0.5f),
+               doReading.voltageModuleEst,
+               (unsigned long)(doReading.voltageModuleEst * 1000.0f + 0.5f),
+               (unsigned)doTempC,
+               doMgL);
     lastDebugPrintMs = nowMs;
   }
 
   if (!doUpload)
     return;
 
-  TxJob job = {tempC, tempValid, phValue, doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst};
+  TxJob job = {tempC, tempValid, phValue, doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst, doMgL};
   if (xQueueSend(txJobQueue, &job, 0) != pdTRUE)
   {
     DBG_PRINTLN("[DBG] TX queue full (POST still running); will retry.");

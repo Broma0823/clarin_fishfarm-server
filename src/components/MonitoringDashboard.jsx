@@ -629,14 +629,14 @@ export const MonitoringDashboardContent = ({
           <ParameterGauge
             label="Dissolved Oxygen"
             value={deviceReadings?.dissolvedOxygen ?? null}
-            unit="V"
+            unit="mg/L"
             min={0}
-            max={3.5}
-            optimalMin={0.5}
-            optimalMax={3.0}
+            max={20}
+            optimalMin={5}
+            optimalMax={9}
             color="#06b6d4"
-            description="Raw sensor voltage (uncalibrated)"
-            tooltip="Dissolved oxygen sensor is currently uncalibrated — displaying raw estimated module voltage. Once calibrated with fill solution, this will show mg/L values."
+            description="Calibrated dissolved oxygen concentration in water"
+            tooltip="Dissolved oxygen concentration from the calibrated probe in mg/L. For tilapia, values below 5 mg/L can stress fish."
           />
         </div>
       </div>

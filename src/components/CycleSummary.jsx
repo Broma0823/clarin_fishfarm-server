@@ -270,10 +270,7 @@ export const CycleSummaryContent = ({ cycleId, onBack }) => {
           <div>
             <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>Dissolved Oxygen</p>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '1.5rem', fontWeight: '700', color: '#1a202c' }}>
-              {cycleData.avgDissolvedOxygen ? `${cycleData.avgDissolvedOxygen} V` : '—'}
-            </p>
-            <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.75rem', color: '#94a3b8' }}>
-              (raw voltage — uncalibrated)
+              {cycleData.avgDissolvedOxygen ? `${cycleData.avgDissolvedOxygen} mg/L` : '—'}
             </p>
           </div>
           <div>
