@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <WebServer.h>
 #include <HTTPClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -22,8 +23,8 @@
 #define DBG_PRINTF(...)
 #endif
 
-const char *WIFI_SSID = "R3JHOMEFIBRa4780";
-const char *WIFI_PASSWORD = "R3JWIFIwwk9a";
+const char *WIFI_SSID = "Candog";
+const char *WIFI_PASSWORD = "Qwerty12345-";
 const char *WIFI_SSID_2 = "iPhone";
 const char *WIFI_PASSWORD_2 = "12345678";
 
@@ -53,7 +54,7 @@ static unsigned long wifiReconnectBackoffMs()
 }
 
 #ifndef FISHFARM_API_URL
-#define FISHFARM_API_URL "http://192.168.1.11:4000/api/monitoring"
+#define FISHFARM_API_URL "http://192.168.1.20:4000/api/monitoring"
 #endif
 const char *CYCLE_ID = "CYCLE-2026-01";
 const char *CYCLE_START_DATE = "2026-04-07";
@@ -91,9 +92,13 @@ struct DoReading
   float voltageModuleEst;
 };
 
+static float readPhLevel(void);
+static DoReading readDoRaw(void);
+
 struct TxJob
 {
   float tempC;
+  bool tempValid;
   float phLevel;
   uint32_t doRawAdc;
   float doVoltagePin;
@@ -109,6 +114,126 @@ struct TxResult
 
 static QueueHandle_t txJobQueue = nullptr;
 static QueueHandle_t txResultQueue = nullptr;
+
+WebServer statusServer(80);
+
+static int gLastHttpStatus = -1;
+static bool gLastUploadSuccess = false;
+static unsigned long gLastUploadResultMs = 0;
+static unsigned long gLastUploadSuccessMs = 0;
+static char gLastUploadError[96] = {0};
+
+static void jsonEscape(const char *in, char *out, size_t outSz)
+{
+  size_t j = 0;
+  if (!in || !out || outSz < 4)
+    return;
+  for (size_t i = 0; in[i] && j + 2 < outSz; i++)
+  {
+    const char c = in[i];
+    if (c == '"' || c == '\\')
+    {
+      if (j + 3 >= outSz)
+        break;
+      out[j++] = '\\';
+      out[j++] = c;
+    }
+    else if ((unsigned char)c < 0x20)
+    {
+      if (j + 2 >= outSz)
+        break;
+      out[j++] = ' ';
+    }
+    else
+      out[j++] = c;
+  }
+  out[j] = '\0';
+}
+
+static void handleStatusData(void)
+{
+  float tempC = 0.0f;
+  bool tempValid = false;
+  if (gDs18b20Ready)
+  {
+    sensors.requestTemperatures();
+    yield();
+    tempC = sensors.getTempC(insideThermometer);
+    tempValid = (tempC != DEVICE_DISCONNECTED_C);
+  }
+
+  const float phValue = readPhLevel();
+  const DoReading doReading = readDoRaw();
+
+  char errEsc[128] = {0};
+  jsonEscape(gLastUploadError, errEsc, sizeof(errEsc));
+
+  String json = "{";
+  json += "\"wifi\":\"" + String(WiFi.status() == WL_CONNECTED ? "connected" : "disconnected") + "\",";
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    json += "\"ssid\":\"" + WiFi.SSID() + "\",";
+    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+    json += "\"mac\":\"" + WiFi.macAddress() + "\",";
+  }
+  json += "\"apiUrl\":\"" + String(FISHFARM_API_URL) + "\",";
+  json += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
+  json += "\"ds18b20Ready\":" + String(gDs18b20Ready ? "true" : "false") + ",";
+  json += "\"tempValid\":" + String(tempValid ? "true" : "false") + ",";
+  if (tempValid)
+    json += "\"waterTemperatureC\":" + String(tempC, 2) + ",";
+  else
+    json += "\"waterTemperatureC\":null,";
+  json += "\"ph\":" + String(phValue, 2) + ",";
+  json += "\"doRawAdc\":" + String((unsigned long)doReading.rawAdc) + ",";
+  json += "\"doVoltagePinV\":" + String(doReading.voltagePin, 3) + ",";
+  json += "\"doVoltageModuleEstV\":" + String(doReading.voltageModuleEst, 3) + ",";
+  json += "\"lastHttpStatus\":" + String(gLastHttpStatus) + ",";
+  json += "\"lastUploadSuccess\":" + String(gLastUploadSuccess ? "true" : "false") + ",";
+  json += "\"lastUploadResultMs\":" + String(gLastUploadResultMs) + ",";
+  json += "\"lastUploadSuccessMs\":" + String(gLastUploadSuccessMs) + ",";
+  json += "\"lastUploadError\":\"" + String(errEsc) + "\"";
+  json += "}";
+
+  statusServer.send(200, "application/json", json);
+}
+
+static void handleStatusRoot(void)
+{
+  static const char page[] PROGMEM =
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+      "<title>ESP32 device monitor</title>"
+      "<style>body{font-family:system-ui,Segoe UI,sans-serif;margin:1rem;max-width:52rem;background:#f8fafc;color:#0f172a}"
+      "h1{font-size:1.2rem}#hint{color:#64748b;font-size:.85rem}pre{background:#fff;border:1px solid #e2e8f0;padding:1rem;border-radius:10px;overflow:auto;font-size:.8rem}"
+      "table{border-collapse:collapse;width:100%;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0}"
+      "td,th{padding:.5rem .65rem;text-align:left;font-size:.85rem}th{background:#f1f5f9}</style></head><body>"
+      "<h1>Fishfarm ESP32 — device monitor</h1>"
+      "<p id=\"hint\">Loading…</p>"
+      "<table id=\"tbl\"><tbody></tbody></table>"
+      "<pre id=\"out\"></pre>"
+      "<script>"
+      "async function tick(){try{"
+      "const j=await(await fetch('/data')).json();"
+      "document.getElementById('out').textContent=JSON.stringify(j,null,2);"
+      "document.getElementById('hint').textContent='Updated '+new Date().toLocaleString();"
+      "const r=(k,v)=>'<tr><th>'+k+'</th><td>'+(v===null||v===undefined?'—':String(v))+'</td></tr>';"
+      "let t='';"
+      "t+=r('WiFi',j.wifi);if(j.ssid)t+=r('SSID',j.ssid);if(j.ip)t+=r('IP',j.ip);"
+      "if(j.rssi!==undefined)t+=r('RSSI (dBm)',j.rssi);if(j.mac)t+=r('MAC',j.mac);"
+      "t+=r('API URL (Pi Wi‑Fi)',j.apiUrl);t+=r('Cycle',j.cycleId);t+=r('DS18B20 ready',j.ds18b20Ready);"
+      "t+=r('Temp valid',j.tempValid);t+=r('Water °C',j.waterTemperatureC);t+=r('pH',j.ph);"
+      "t+=r('DO raw ADC',j.doRawAdc);t+=r('DO V @ pin',j.doVoltagePinV);t+=r('DO V @ module (est)',j.doVoltageModuleEstV);"
+      "t+=r('Last HTTP status',j.lastHttpStatus);t+=r('Last upload OK',j.lastUploadSuccess);"
+      "t+=r('Last upload error',j.lastUploadError||'—');"
+      "document.querySelector('#tbl tbody').innerHTML=t;"
+      "}catch(e){document.getElementById('hint').textContent=String(e);}}"
+      "tick();setInterval(tick,2000);"
+      "</script></body></html>";
+
+  statusServer.send_P(200, "text/html", page);
+}
 
 static float readPhLevel()
 {
@@ -165,15 +290,18 @@ static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
   }
 
   HTTPClient http;
-  http.setConnectTimeout(3000);
-  http.setTimeout(4000);
+  http.setConnectTimeout(8000);
+  http.setTimeout(10000);
   http.begin(FISHFARM_API_URL);
   http.addHeader("Content-Type", "application/json");
 
   String body = "{";
   body += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
   body += "\"cycleStartDate\":\"" + String(CYCLE_START_DATE) + "\",";
-  body += "\"waterTemperature\":" + String(job.tempC, 2) + ",";
+  if (job.tempValid)
+    body += "\"waterTemperature\":" + String(job.tempC, 2) + ",";
+  else
+    body += "\"waterTemperature\":null,";
   body += "\"phLevel\":" + String(job.phLevel, 2) + ",";
   body += "\"dissolvedOxygen\":" + String(job.doVoltageModuleEst, 3);
   body += "}";
@@ -215,6 +343,15 @@ static void drainTxResults(void)
   TxResult r;
   while (xQueueReceive(txResultQueue, &r, 0) == pdTRUE)
   {
+    gLastHttpStatus = r.httpStatus;
+    gLastUploadSuccess = r.success;
+    gLastUploadResultMs = millis();
+    if (r.success)
+      gLastUploadSuccessMs = gLastUploadResultMs;
+    std::memset(gLastUploadError, 0, sizeof(gLastUploadError));
+    if (r.errDetail[0] != '\0')
+      std::strncpy(gLastUploadError, r.errDetail, sizeof(gLastUploadError) - 1);
+
     if (r.success)
       Serial.printf("[TX] Upload to server: SUCCESS (HTTP %d)\n", r.httpStatus);
     else
@@ -398,18 +535,18 @@ void setup(void)
   smartWiFiConnect();
   lastWifiStatusLogMs = millis();
   printWifiStatus();
+
+  statusServer.on("/", HTTP_GET, handleStatusRoot);
+  statusServer.on("/data", HTTP_GET, handleStatusData);
+  statusServer.begin();
+  DBG_PRINTLN("[HTTP] Device monitor (browser): http://<ESP32-IP>/  (JSON: /data)");
 }
 
 void loop(void)
 {
   monitorWiFi();
   drainTxResults();
-
-  if (!gDs18b20Ready)
-  {
-    delay(500);
-    return;
-  }
+  statusServer.handleClient();
 
   const unsigned long nowMs = millis();
   const bool doDebugPrint = (nowMs - lastDebugPrintMs >= DEBUG_PRINT_INTERVAL_MS);
@@ -433,16 +570,24 @@ void loop(void)
     printWifiStatus();
   }
 
-  sensors.requestTemperatures();
-  yield();
+  float tempC = 0.0f;
+  bool tempValid = false;
+  if (gDs18b20Ready)
+  {
+    sensors.requestTemperatures();
+    yield();
+    tempC = sensors.getTempC(insideThermometer);
+    tempValid = (tempC != DEVICE_DISCONNECTED_C);
+  }
 
-  const float tempC = sensors.getTempC(insideThermometer);
   const float phValue = readPhLevel();
   const DoReading doReading = readDoRaw();
 
   if (doDebugPrint)
   {
-    if (tempC == DEVICE_DISCONNECTED_C)
+    if (!gDs18b20Ready)
+      DBG_PRINTLN("Temp: (DS18B20 not detected)");
+    else if (!tempValid)
       DBG_PRINTLN("Temp: (disconnected)");
     else
       DBG_PRINTF("Temp: %.2f C (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
@@ -455,14 +600,7 @@ void loop(void)
   if (!doUpload)
     return;
 
-  if (tempC == DEVICE_DISCONNECTED_C)
-  {
-    DBG_PRINTLN("Upload skipped: DS18B20 disconnected");
-    lastSampleMs = nowMs;
-    return;
-  }
-
-  TxJob job = {tempC, phValue, doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst};
+  TxJob job = {tempC, tempValid, phValue, doReading.rawAdc, doReading.voltagePin, doReading.voltageModuleEst};
   if (xQueueSend(txJobQueue, &job, 0) != pdTRUE)
   {
     DBG_PRINTLN("[DBG] TX queue full (POST still running); will retry.");

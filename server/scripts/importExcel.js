@@ -99,10 +99,15 @@ const toNumber = (value) => {
 }
 
 /** beneficiary_distributions.quantity is BIGINT — Excel may have decimals (e.g. 31.5 kg). */
-const toIntegerQuantity = (value) => {
-  const n = toNumber(value)
-  if (n === null) return null
-  return Math.round(n)
+const parseQuantityCell = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const text = String(value).trim().toLowerCase()
+  const numericMatch = text.match(/-?\d+(?:,\d{3})*(?:\.\d+)?/)
+  if (!numericMatch) return null
+  const n = Number(numericMatch[0].replace(/,/g, ''))
+  if (!Number.isFinite(n)) return null
+  const quantityUnit = /(kg|kgs|kilo|kilos|kl|kls)\b/.test(text) ? 'kls' : 'pcs'
+  return { quantity: Math.round(n), quantityUnit }
 }
 
 const isGenderCell = (value) => {
@@ -174,6 +179,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
   let contact
   let species
   let quantity
+  let quantity_unit = 'pcs'
   let cost
   let implementation_type
   let satisfaction
@@ -187,7 +193,9 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[6] ?? null
     contact = row[7] ?? null
     species = row[8] ?? null
-    quantity = toIntegerQuantity(row[9])
+    const parsedQuantity = parseQuantityCell(row[9])
+    quantity = parsedQuantity?.quantity ?? null
+    quantity_unit = parsedQuantity?.quantityUnit ?? 'pcs'
     cost = toNumber(row[10]) ? toNumber(row[10]) * 1000 : null
     implementation_type = row[11] ?? null
     satisfaction = row[12] ?? null
@@ -200,7 +208,9 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[5] ?? null
     contact = row[6] ?? null
     species = row[7] ?? null
-    quantity = toIntegerQuantity(row[8])
+    const parsedQuantity = parseQuantityCell(row[8])
+    quantity = parsedQuantity?.quantity ?? null
+    quantity_unit = parsedQuantity?.quantityUnit ?? 'pcs'
     cost = toNumber(row[9]) ? toNumber(row[9]) * 1000 : null
     implementation_type = row[10] ?? null
     satisfaction = row[11] ?? null
@@ -211,7 +221,23 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     municipality = row[4] ?? null
     contact = row[5] ?? null
     species = row[6] ?? null
-    quantity = toIntegerQuantity(row[7])
+    const parsedQuantity = parseQuantityCell(row[7])
+    quantity = parsedQuantity?.quantity ?? null
+    quantity_unit = parsedQuantity?.quantityUnit ?? 'pcs'
+    cost = toNumber(row[8]) ? toNumber(row[8]) * 1000 : null
+    implementation_type = row[9] ?? null
+    satisfaction = row[10] ?? null
+  } else if (row[1] && (row[6] != null || row[7] != null || row[8] != null)) {
+    // Fallback for organization-like rows in regular monthly sheets where gender is blank.
+    fullName = String(row[1] ?? '').trim()
+    gender = 'N/A'
+    barangay = row[3] ?? null
+    municipality = row[4] ?? null
+    contact = row[5] ?? null
+    species = row[6] ?? null
+    const parsedQuantity = parseQuantityCell(row[7])
+    quantity = parsedQuantity?.quantity ?? null
+    quantity_unit = parsedQuantity?.quantityUnit ?? 'pcs'
     cost = toNumber(row[8]) ? toNumber(row[8]) * 1000 : null
     implementation_type = row[9] ?? null
     satisfaction = row[10] ?? null
@@ -230,7 +256,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
   return {
     beneficiary_excel_id: benId,
     distribution_excel_id: distId,
-    classification: 'individual',
+    classification: gender === 'N/A' ? 'group' : 'individual',
     name: nameForDb,
     gender,
     barangay,
@@ -238,6 +264,7 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     contact,
     species,
     quantity,
+    quantity_unit,
     cost,
     implementation_type,
     satisfaction,
@@ -264,15 +291,16 @@ const insertRows = async (rows) => {
       RETURNING id
     )
     INSERT INTO beneficiary_distributions (
-      beneficiary_id, excel_id, species, quantity, cost, implementation_type, satisfaction, date_implemented
+      beneficiary_id, excel_id, species, quantity, quantity_unit, cost, implementation_type, satisfaction, date_implemented
     ) VALUES (
       (SELECT id FROM upsert_beneficiary),
-      $8, $9, $10, $11, $12, $13, $14
+      $8, $9, $10, $11, $12, $13, $14, $15
     )
     ON CONFLICT (excel_id) DO UPDATE
     SET
       species = EXCLUDED.species,
       quantity = EXCLUDED.quantity,
+      quantity_unit = EXCLUDED.quantity_unit,
       cost = EXCLUDED.cost,
       implementation_type = EXCLUDED.implementation_type,
       satisfaction = EXCLUDED.satisfaction,
@@ -291,6 +319,7 @@ const insertRows = async (rows) => {
       row.distribution_excel_id,
       row.species,
       row.quantity,
+      row.quantity_unit || 'pcs',
       row.cost,
       row.implementation_type,
       row.satisfaction,
@@ -329,6 +358,7 @@ const flattenGroupBlock = (cur) => {
   let rep
   let species
   let quantity
+  let quantity_unit = 'pcs'
   let cost
   let implementation_type
   let satisfaction
@@ -338,7 +368,11 @@ const flattenGroupBlock = (cur) => {
     if (r[5]) contact = String(r[5]).trim() || contact
     if (r[6]) rep = String(r[6]).trim() || rep
     if (r[7]) species = String(r[7]).trim() || species
-    if (r[8] != null && r[8] !== '') quantity = toIntegerQuantity(r[8]) ?? quantity
+    if (r[8] != null && r[8] !== '') {
+      const parsedQuantity = parseQuantityCell(r[8])
+      quantity = parsedQuantity?.quantity ?? quantity
+      quantity_unit = parsedQuantity?.quantityUnit ?? quantity_unit
+    }
     if (r[9] != null && r[9] !== '') cost = toNumber(r[9]) ? toNumber(r[9]) * 1000 : cost
     if (r[10]) implementation_type = String(r[10]).trim() || implementation_type
     if (r[11]) satisfaction = String(r[11]).trim() || satisfaction
@@ -352,6 +386,7 @@ const flattenGroupBlock = (cur) => {
     contact: contactMerged,
     species: species ?? null,
     quantity: quantity ?? null,
+    quantity_unit,
     cost: cost ?? null,
     implementation_type: implementation_type ?? null,
     satisfaction: satisfaction ?? null,
@@ -413,6 +448,7 @@ const normalizeGroupFlatRow = (flat, sheetName, rowIndex) => {
     contact: flat.contact,
     species: flat.species,
     quantity: flat.quantity,
+    quantity_unit: flat.quantity_unit || 'pcs',
     cost: flat.cost,
     implementation_type: flat.implementation_type,
     satisfaction: flat.satisfaction,

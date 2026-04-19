@@ -123,10 +123,12 @@ function App() {
   const [newRecord, setNewRecord] = useState({
     name: '',
     gender: '',
+    contact: '',
     barangay: '',
     municipality: '',
     species: '',
     quantity: '',
+    quantityUnit: 'pcs',
     cost: '',
     implementationType: '',
     satisfaction: '',
@@ -910,10 +912,12 @@ function App() {
     setNewRecord({
       name: record.name || '',
       gender: record.gender || '',
+      contact: record.contact || '',
       barangay: record.barangay || '',
       municipality: record.municipality || '',
       species: record.species || '',
       quantity: record.quantity?.toString() || '',
+      quantityUnit: record.quantity_unit || record.quantityUnit || 'pcs',
       cost: record.cost?.toString() || '',
       implementationType: record.implementationType || record.implementation_type || '',
       satisfaction: record.satisfaction || '',
@@ -927,9 +931,30 @@ function App() {
     setIsSubmitting(true)
 
     try {
+      const beneficiaryId = editingRecord.beneficiary_id || editingRecord.beneficiaryId
+      if (beneficiaryId) {
+        const beneficiaryPayload = {
+          name: newRecord.name || null,
+          gender: newRecord.gender || null,
+          contact: newRecord.contact || null,
+          barangay: newRecord.barangay || null,
+          municipality: newRecord.municipality || null,
+        }
+        const beneficiaryResponse = await fetch(`${API_BASE_URL}/beneficiaries/${beneficiaryId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(beneficiaryPayload),
+        })
+        if (!beneficiaryResponse.ok) {
+          const errorPayload = await beneficiaryResponse.json()
+          throw new Error(errorPayload.error || 'Failed to update beneficiary details')
+        }
+      }
+
       const payload = {
         species: newRecord.species || null,
         quantity: newRecord.quantity ? Number(newRecord.quantity) : null,
+        quantityUnit: newRecord.quantityUnit || 'pcs',
         cost: newRecord.cost ? Number(newRecord.cost) : null,
         implementationType: newRecord.implementationType || null,
         satisfaction: newRecord.satisfaction || null,
@@ -2442,6 +2467,17 @@ function App() {
                 </div>
                 <div className="form-row">
                   <label className="field">
+                    <span>Phone Number</span>
+                    <input
+                      type="text"
+                      value={newRecord.contact}
+                      onChange={(e) => setNewRecord({ ...newRecord, contact: e.target.value })}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label className="field">
                     <span>Barangay</span>
                     <input
                       type="text"
@@ -2471,7 +2507,7 @@ function App() {
                     />
                   </label>
                   <label className="field">
-                    <span>Quantity (pcs) *</span>
+                    <span>Quantity *</span>
                     <input
                       type="number"
                       value={newRecord.quantity}
@@ -2480,6 +2516,17 @@ function App() {
                       min="0"
                       disabled={isSubmitting}
                     />
+                  </label>
+                  <label className="field">
+                    <span>Unit</span>
+                    <select
+                      value={newRecord.quantityUnit}
+                      onChange={(e) => setNewRecord({ ...newRecord, quantityUnit: e.target.value })}
+                      disabled={isSubmitting}
+                    >
+                      <option value="pcs">pcs</option>
+                      <option value="kls">kls</option>
+                    </select>
                   </label>
                 </div>
                 <div className="form-row">
@@ -2496,16 +2543,12 @@ function App() {
                   </label>
                   <label className="field">
                     <span>Implementation Type</span>
-                    <select
+                    <input
+                      type="text"
                       value={newRecord.implementationType}
                       onChange={(e) => setNewRecord({ ...newRecord, implementationType: e.target.value })}
                       disabled={isSubmitting}
-                    >
-                      <option value="">Select...</option>
-                      <option value="Direct Distribution">Direct Distribution</option>
-                      <option value="Community-Based">Community-Based</option>
-                      <option value="Institutional">Institutional</option>
-                    </select>
+                    />
                   </label>
                 </div>
                 <div className="form-row">

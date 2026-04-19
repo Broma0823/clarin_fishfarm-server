@@ -61,6 +61,7 @@ export const listDistributions = async (req, res, next) => {
         d.excel_id,
         d.species,
         d.quantity,
+        d.quantity_unit,
         d.cost,
         d.implementation_type,
         d.satisfaction,
@@ -93,6 +94,7 @@ export const createDistribution = async (req, res, next) => {
       excelId,
       species,
       quantity,
+      quantityUnit,
       cost,
       implementationType,
       satisfaction,
@@ -106,8 +108,9 @@ export const createDistribution = async (req, res, next) => {
     const insertSql = `
       INSERT INTO beneficiary_distributions (
         beneficiary_id, excel_id, species, quantity, cost, implementation_type, satisfaction, date_implemented
+        , quantity_unit
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8
+        $1, $2, $3, $4, $5, $6, $7, $8, $9
       )
       RETURNING *;
     `
@@ -121,6 +124,7 @@ export const createDistribution = async (req, res, next) => {
       implementationType || null,
       satisfaction || null,
       dateImplemented || null,
+      quantityUnit || 'pcs',
     ])
 
     const distribution = insertResult.rows[0]
@@ -133,6 +137,7 @@ export const createDistribution = async (req, res, next) => {
         d.excel_id,
         d.species,
         d.quantity,
+        d.quantity_unit,
         d.cost,
         d.implementation_type,
         d.satisfaction,
@@ -164,6 +169,7 @@ export const updateDistribution = async (req, res, next) => {
     const {
       species,
       quantity,
+      quantityUnit,
       cost,
       implementationType,
       satisfaction,
@@ -175,17 +181,19 @@ export const updateDistribution = async (req, res, next) => {
       SET
         species = COALESCE($1, species),
         quantity = COALESCE($2, quantity),
-        cost = COALESCE($3, cost),
-        implementation_type = COALESCE($4, implementation_type),
-        satisfaction = COALESCE($5, satisfaction),
-        date_implemented = COALESCE($6, date_implemented)
-      WHERE id = $7
+        quantity_unit = COALESCE($3, quantity_unit),
+        cost = COALESCE($4, cost),
+        implementation_type = COALESCE($5, implementation_type),
+        satisfaction = COALESCE($6, satisfaction),
+        date_implemented = COALESCE($7, date_implemented)
+      WHERE id = $8
       RETURNING *;
     `
 
     const result = await query(sql, [
       species || null,
       quantity !== undefined && quantity !== null ? Number(quantity) : null,
+      quantityUnit || null,
       cost !== undefined && cost !== null ? Number(cost) : null,
       implementationType || null,
       satisfaction || null,
@@ -204,6 +212,7 @@ export const updateDistribution = async (req, res, next) => {
         d.excel_id,
         d.species,
         d.quantity,
+        d.quantity_unit,
         d.cost,
         d.implementation_type,
         d.satisfaction,

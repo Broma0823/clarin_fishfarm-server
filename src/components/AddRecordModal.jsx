@@ -3,21 +3,16 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 const emptyNewRecord = () => ({
   name: '',
   gender: '',
+  contact: '',
   barangay: '',
   municipality: '',
   species: '',
   quantity: '',
+  quantityUnit: 'pcs',
   cost: '',
   implementationType: '',
   satisfaction: '',
   dateImplemented: '',
-})
-
-const emptyNewBeneficiary = () => ({
-  name: '',
-  gender: '',
-  barangay: '',
-  municipality: '',
 })
 
 function AddRecordModalInner({
@@ -31,8 +26,6 @@ function AddRecordModalInner({
 }) {
   const [newRecord, setNewRecord] = useState(emptyNewRecord)
   const [selectedBeneficiary, setSelectedBeneficiary] = useState(null)
-  const [newBeneficiary, setNewBeneficiary] = useState(emptyNewBeneficiary)
-  const [isCreatingBeneficiary, setIsCreatingBeneficiary] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [nameSuggestions, setNameSuggestions] = useState([])
   const [showNameSuggestions, setShowNameSuggestions] = useState(false)
@@ -43,10 +36,8 @@ function AddRecordModalInner({
     if (!open) return
     setNewRecord(emptyNewRecord())
     setSelectedBeneficiary(null)
-    setNewBeneficiary(emptyNewBeneficiary())
     setNameSuggestions([])
     setShowNameSuggestions(false)
-    setIsCreatingBeneficiary(false)
     setIsSubmitting(false)
   }, [open])
 
@@ -116,6 +107,7 @@ function AddRecordModalInner({
           ...prev,
           name: beneficiary.name || prev.name,
           gender: beneficiary.gender || prev.gender,
+          contact: beneficiary.contact || prev.contact,
           barangay: beneficiary.barangay || prev.barangay,
           municipality: beneficiary.municipality || prev.municipality,
         }))
@@ -139,6 +131,7 @@ function AddRecordModalInner({
               ...prev,
               name: beneficiary.name || prev.name,
               gender: beneficiary.gender || prev.gender,
+              contact: beneficiary.contact || prev.contact,
               barangay: beneficiary.barangay || prev.barangay,
               municipality: beneficiary.municipality || prev.municipality,
             }))
@@ -158,83 +151,78 @@ function AddRecordModalInner({
       ...prev,
       name: '',
       gender: '',
+      contact: '',
       barangay: '',
       municipality: '',
     }))
   }, [])
 
-  const handleCreateBeneficiary = useCallback(
-    async (event) => {
-      event.preventDefault()
-      if (!newBeneficiary.name.trim()) {
-        onAdded({ type: 'toast', message: 'Please enter a beneficiary name before saving.' })
-        return
+  const findOrCreateBeneficiary = useCallback(
+    async (name, gender, contact, barangay, municipality) => {
+      const trimmedName = name.trim()
+      const params = new URLSearchParams({
+        name: trimmedName,
+        classification: classification || 'individual',
+      })
+      const searchRes = await fetch(
+        `${apiBaseUrl}/beneficiaries/by-name?${params.toString()}`
+      )
+      if (searchRes.ok) {
+        const payload = await searchRes.json()
+        if (payload.data) return payload.data
       }
 
-      setIsCreatingBeneficiary(true)
-      try {
-        const payload = {
+      const createRes = await fetch(`${apiBaseUrl}/beneficiaries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           excelId: `BEN-${Date.now()}`,
-          classification,
-          name: newBeneficiary.name.trim(),
-          gender: newBeneficiary.gender || null,
-          barangay: newBeneficiary.barangay || null,
-          municipality: newBeneficiary.municipality || null,
-        }
-
-        const response = await fetch(`${apiBaseUrl}/beneficiaries`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const resultBody = await response.json()
-        if (!response.ok) {
-          throw new Error(resultBody.error || 'Failed to save beneficiary')
-        }
-
-        const saved = resultBody.data
-        setSelectedBeneficiary(saved)
-        setNewRecord((prev) => ({
-          ...prev,
-          name: saved?.name || prev.name,
-          gender: saved?.gender || '',
-          barangay: saved?.barangay || '',
-          municipality: saved?.municipality || '',
-        }))
-        setNewBeneficiary(emptyNewBeneficiary())
-        setNameSuggestions([])
-        setShowNameSuggestions(false)
-        onAdded({
-          type: 'toast',
-          message: 'Beneficiary saved. Now add distribution details.',
-        })
-      } catch (err) {
-        console.error(err)
-        onAdded({ type: 'toast', message: `Error: ${err.message}` })
-      } finally {
-        setIsCreatingBeneficiary(false)
+          classification: classification || 'individual',
+          name: trimmedName,
+          gender: gender || null,
+          contact: contact || null,
+          barangay: barangay || null,
+          municipality: municipality || null,
+        }),
+      })
+      const createBody = await createRes.json()
+      if (!createRes.ok) {
+        throw new Error(createBody.error || 'Failed to create beneficiary')
       }
+      return createBody.data
     },
-    [apiBaseUrl, classification, newBeneficiary, onAdded]
+    [apiBaseUrl, classification]
   )
 
   const handleAddRecord = useCallback(
     async (event) => {
       event.preventDefault()
-      if (!selectedBeneficiary?.id) {
-        onAdded({
-          type: 'toast',
-          message: 'Select an existing beneficiary or add one before saving the distribution.',
-        })
+
+      if (!newRecord.name.trim()) {
+        onAdded({ type: 'toast', message: 'Please enter a beneficiary name.' })
         return
       }
+
       setIsSubmitting(true)
       try {
+        let beneficiary = selectedBeneficiary
+
+        if (!beneficiary?.id) {
+          beneficiary = await findOrCreateBeneficiary(
+            newRecord.name,
+            newRecord.gender,
+            newRecord.contact,
+            newRecord.barangay,
+            newRecord.municipality
+          )
+        }
+
         const recordData = {
           excelId: `MANUAL-${Date.now()}`,
-          beneficiaryId: selectedBeneficiary.id,
+          beneficiaryId: beneficiary.id,
           species: newRecord.species || null,
           quantity: newRecord.quantity ? Number(newRecord.quantity) : null,
+          quantityUnit: newRecord.quantityUnit || 'pcs',
           cost: newRecord.cost ? Number(newRecord.cost) : null,
           implementationType: newRecord.implementationType || null,
           satisfaction: newRecord.satisfaction || null,
@@ -276,6 +264,7 @@ function AddRecordModalInner({
     [
       apiBaseUrl,
       classification,
+      findOrCreateBeneficiary,
       newRecord,
       onAdded,
       onClose,
@@ -321,12 +310,8 @@ function AddRecordModalInner({
                 }}
                 required
                 disabled={isSubmitting}
-                placeholder="Search existing beneficiary..."
+                placeholder="Type name to search or add new..."
               />
-              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.35rem' }}>
-                Select an existing beneficiary. If not found, add them below, then continue with the
-                distribution details.
-              </div>
               {showNameSuggestions && nameSuggestions.length > 0 && (
                 <div
                   style={{
@@ -413,9 +398,9 @@ function AddRecordModalInner({
               style={{
                 margin: '0.5rem 0 1rem',
                 padding: '0.75rem',
-                border: '1px solid #e5e7eb',
+                border: '1px solid #d1fae5',
                 borderRadius: '8px',
-                background: '#f8fafc',
+                background: '#ecfdf5',
                 display: 'flex',
                 justifyContent: 'space-between',
                 gap: '1rem',
@@ -423,9 +408,13 @@ function AddRecordModalInner({
               }}
             >
               <div>
+                <div style={{ fontSize: '0.75rem', color: '#059669', fontWeight: 600, marginBottom: '0.25rem' }}>
+                  ✓ Existing beneficiary matched
+                </div>
                 <div style={{ fontWeight: 700, color: '#111827' }}>{selectedBeneficiary.name}</div>
                 <div style={{ fontSize: '0.9rem', color: '#374151' }}>
-                  {selectedBeneficiary.gender || '—'} · {selectedBeneficiary.barangay || '—'} ·{' '}
+                  {selectedBeneficiary.gender || '—'} · {selectedBeneficiary.contact || '—'} ·{' '}
+                  {selectedBeneficiary.barangay || '—'} ·{' '}
                   {selectedBeneficiary.municipality || '—'}
                 </div>
               </div>
@@ -436,88 +425,24 @@ function AddRecordModalInner({
                 className="cancel-button"
                 style={{ padding: '0.5rem 0.75rem' }}
               >
-                Change beneficiary
+                Change
               </button>
             </div>
           )}
 
-          <div
-            style={{
-              marginBottom: '1rem',
-              border: '1px dashed #cbd5e1',
-              borderRadius: '10px',
-              padding: '0.75rem',
-              background: '#f8fafc',
-            }}
-          >
-            <div style={{ fontWeight: 600, color: '#1f2937', marginBottom: '0.5rem' }}>
-              Add beneficiary (if not found)
-            </div>
-            <div className="form-row">
-              <label className="field">
-                <span>Name *</span>
-                <input
-                  type="text"
-                  value={newBeneficiary.name}
-                  onChange={(e) =>
-                    setNewBeneficiary((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  disabled={isCreatingBeneficiary}
-                  placeholder="Full name"
-                />
-              </label>
-              <label className="field">
-                <span>Gender</span>
-                <select
-                  value={newBeneficiary.gender}
-                  onChange={(e) =>
-                    setNewBeneficiary((prev) => ({ ...prev, gender: e.target.value }))
-                  }
-                  disabled={isCreatingBeneficiary}
-                >
-                  <option value="">Select...</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                </select>
-              </label>
-            </div>
-            <div className="form-row">
-              <label className="field">
-                <span>Barangay</span>
-                <input
-                  type="text"
-                  value={newBeneficiary.barangay}
-                  onChange={(e) =>
-                    setNewBeneficiary((prev) => ({ ...prev, barangay: e.target.value }))
-                  }
-                  disabled={isCreatingBeneficiary}
-                />
-              </label>
-              <label className="field">
-                <span>Municipality</span>
-                <input
-                  type="text"
-                  value={newBeneficiary.municipality}
-                  onChange={(e) =>
-                    setNewBeneficiary((prev) => ({ ...prev, municipality: e.target.value }))
-                  }
-                  disabled={isCreatingBeneficiary}
-                />
-              </label>
-            </div>
-            <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-              <button
-                type="button"
-                className="submit-button"
-                onClick={handleCreateBeneficiary}
-                disabled={isCreatingBeneficiary}
-                style={{ padding: '0.5rem 1rem' }}
-              >
-                {isCreatingBeneficiary ? 'Saving...' : 'Save Beneficiary'}
-              </button>
-            </div>
+          <div className="form-row">
+            <label className="field">
+              <span>Phone Number</span>
+              <input
+                type="text"
+                value={selectedBeneficiary?.contact ?? newRecord.contact}
+                onChange={(e) =>
+                  setNewRecord((prev) => ({ ...prev, contact: e.target.value }))
+                }
+                disabled={isSubmitting || !!selectedBeneficiary}
+              />
+            </label>
           </div>
-
           <div className="form-row">
             <label className="field">
               <span>Barangay</span>
@@ -556,7 +481,7 @@ function AddRecordModalInner({
               />
             </label>
             <label className="field">
-              <span>Quantity (pcs)</span>
+              <span>Quantity</span>
               <input
                 type="number"
                 value={newRecord.quantity}
@@ -566,6 +491,19 @@ function AddRecordModalInner({
                 min="0"
                 disabled={isSubmitting}
               />
+            </label>
+            <label className="field">
+              <span>Unit</span>
+              <select
+                value={newRecord.quantityUnit}
+                onChange={(e) =>
+                  setNewRecord((prev) => ({ ...prev, quantityUnit: e.target.value }))
+                }
+                disabled={isSubmitting}
+              >
+                <option value="pcs">pcs</option>
+                <option value="kls">kls</option>
+              </select>
             </label>
           </div>
           <div className="form-row">

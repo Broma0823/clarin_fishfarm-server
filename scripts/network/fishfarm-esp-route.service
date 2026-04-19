@@ -1,0 +1,13 @@
+[Unit]
+Description=Route ESP32 host traffic via wlan0 (dual-homed Pi on same LAN)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/fishfarm-esp-route
+ExecStart=/usr/local/bin/pi-route-esp-via-wlan.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

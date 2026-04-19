@@ -46,6 +46,19 @@ const toNumber = (value) => {
   return Number.isFinite(cleaned) ? cleaned : null
 }
 
+const parseQuantityCell = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return { quantity: null, quantityUnit: 'pcs' }
+  }
+  const text = String(value).trim().toLowerCase()
+  const numericMatch = text.match(/-?\d+(?:,\d{3})*(?:\.\d+)?/)
+  if (!numericMatch) return { quantity: null, quantityUnit: 'pcs' }
+  const parsed = Number(numericMatch[0].replace(/,/g, ''))
+  if (!Number.isFinite(parsed)) return { quantity: null, quantityUnit: 'pcs' }
+  const quantityUnit = /(kg|kgs|kilo|kilos|kl|kls)\b/.test(text) ? 'kls' : 'pcs'
+  return { quantity: Math.round(parsed), quantityUnit }
+}
+
 let defaultYear = null
 
 const buildDate = (dayValue, sheetName) => {
@@ -63,20 +76,23 @@ const normalizeRow = (row, sheetName) => {
   const name = row[1]
   const gender = row[2]
 
-  if (!name || !gender) {
+  if (!name) {
     return null
   }
 
+  const { quantity, quantityUnit } = parseQuantityCell(row[7])
+
   return {
     excel_id: `${row[1]}-${row[3] ?? ''}-${row[4] ?? ''}`,
-    classification: 'individual',
+    classification: gender ? 'individual' : 'group',
     name,
-    gender,
+    gender: gender || 'N/A',
     barangay: row[3] ?? null,
     municipality: row[4] ?? null,
     contact: row[5] ?? null,
     species: row[6] ?? null,
-    quantity: toNumber(row[7]),
+    quantity,
+    quantity_unit: quantityUnit,
     cost: toNumber(row[8]) ? toNumber(row[8]) * 1000 : null,
     implementation_type: row[9] ?? null,
     satisfaction: row[10] ?? null,
@@ -96,8 +112,9 @@ const insertRows = async (rows) => {
     INSERT INTO beneficiaries (
       excel_id, classification, name, gender, barangay, municipality, contact,
       species, quantity, cost, implementation_type, satisfaction, date_implemented
+      , quantity_unit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
     )
     ON CONFLICT (excel_id) DO UPDATE
     SET
@@ -109,6 +126,7 @@ const insertRows = async (rows) => {
       contact = EXCLUDED.contact,
       species = EXCLUDED.species,
       quantity = EXCLUDED.quantity,
+      quantity_unit = EXCLUDED.quantity_unit,
       cost = EXCLUDED.cost,
       implementation_type = EXCLUDED.implementation_type,
       satisfaction = EXCLUDED.satisfaction,
@@ -130,6 +148,7 @@ const insertRows = async (rows) => {
       row.implementation_type,
       row.satisfaction,
       row.date_implemented,
+      row.quantity_unit || 'pcs',
     ]
     await query(sql, values)
   }

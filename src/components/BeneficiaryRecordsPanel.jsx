@@ -70,8 +70,7 @@ function BeneficiaryRecordsPanelInner({
         record.name?.toLowerCase().includes(q) ||
         record.barangay?.toLowerCase().includes(q) ||
         record.municipality?.toLowerCase().includes(q) ||
-        record.species?.toLowerCase().includes(q) ||
-        String(record.contact ?? '').toLowerCase().includes(q)
+        record.species?.toLowerCase().includes(q)
     )
   }, [records, debouncedKeyword])
 
@@ -276,7 +275,7 @@ function BeneficiaryRecordsPanelInner({
               <th>Barangay</th>
               <th>Municipality</th>
               <th>Species</th>
-              <th>Quantity (pcs)</th>
+              <th>Quantity</th>
               <th>Implementation</th>
               <th>Satisfaction</th>
               <th>Date</th>
@@ -300,7 +299,7 @@ function BeneficiaryRecordsPanelInner({
                   <td>{record.barangay}</td>
                   <td>{record.municipality}</td>
                   <td>{formatSpecies(record.species)}</td>
-                  <td>{formatNumber(record.quantity)}</td>
+                  <td>{`${formatNumber(record.quantity)} ${record.quantity_unit || record.quantityUnit || (formatSpecies(record.species).toLowerCase().includes('culled') ? 'kls' : 'pcs')}`}</td>
                   <td>{record.implementationType || record.implementation_type}</td>
                   <td>{record.satisfaction}</td>
                   <td>{formatDate(record.dateImplemented ?? record.date_implemented)}</td>

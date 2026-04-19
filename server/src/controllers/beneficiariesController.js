@@ -264,8 +264,8 @@ export const updateBeneficiary = async (req, res, next) => {
       gender,
       barangay,
       municipality,
-      id,
       contact,
+      id,
     ])
 
     if (result.rows.length === 0) {
