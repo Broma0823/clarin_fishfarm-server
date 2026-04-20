@@ -56,10 +56,8 @@ static unsigned long wifiReconnectBackoffMs()
 #ifndef FISHFARM_API_URL
 #define FISHFARM_API_URL "http://192.168.1.20:4000/api/monitoring"
 #endif
-const char *CYCLE_ID = "CYCLE-2026-01";
-const char *CYCLE_START_DATE = "2026-04-07";
 
-const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
+const unsigned long SAMPLE_INTERVAL_MS = 60000UL;
 unsigned long lastSampleMs = 0;
 
 #define DEBUG_PRINT_INTERVAL_MS 3000UL
@@ -85,28 +83,28 @@ static const float DO_R_DIV_TOP_OHMS = 0.0f;
 static const float DO_R_DIV_BOTTOM_OHMS = 1.0f;
 static const float DO_DIVIDER_SCALE =
     (DO_R_DIV_TOP_OHMS + DO_R_DIV_BOTTOM_OHMS) / DO_R_DIV_BOTTOM_OHMS;
-static float phCalibrationValue = 24.05f - 1.05f;
+static float phCalibrationValue = 21.00f - 1.00f;
 
 // Dissolved oxygen (DO) calibration (ported from common Arduino samples, adapted for ESP32).
 // The DO algorithm expects the *sensor module output voltage* in millivolts (mv), and a temperature in °C (0–40).
 // We estimate module voltage from the ADC pin voltage using the same divider scale.
 #ifndef DO_TWO_POINT_CALIBRATION
-#define DO_TWO_POINT_CALIBRATION 0
+#define DO_TWO_POINT_CALIBRATION 1
 #endif
 
 #ifndef DO_CAL1_V_MV
 // Set this to the stable module mV during SEN0237-A single-point calibration (wet probe, exposed to air).
-#define DO_CAL1_V_MV 736
+#define DO_CAL1_V_MV 1225 
 #endif
 #ifndef DO_CAL1_T_C
-#define DO_CAL1_T_C 26
+#define DO_CAL1_T_C 36
 #endif
 
 #ifndef DO_CAL2_V_MV
-#define DO_CAL2_V_MV 1300
+#define DO_CAL2_V_MV 870
 #endif
 #ifndef DO_CAL2_T_C
-#define DO_CAL2_T_C 15
+#define DO_CAL2_T_C 23
 #endif
 
 #ifndef DO_FALLBACK_TEMP_C
@@ -129,6 +127,7 @@ struct DoReading
 
 static float readPhLevel(void);
 static DoReading readDoRaw(void);
+static uint32_t adcRawToMillivolts(uint32_t rawAdc);
 static uint16_t doComputeMgLx1000(uint32_t voltageModuleMv, uint8_t temperatureC);
 static float doComputeMgL(uint32_t voltageModuleMv, uint8_t temperatureC);
 
@@ -220,7 +219,6 @@ static void handleStatusData(void)
     json += "\"mac\":\"" + WiFi.macAddress() + "\",";
   }
   json += "\"apiUrl\":\"" + String(FISHFARM_API_URL) + "\",";
-  json += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
   json += "\"ds18b20Ready\":" + String(gDs18b20Ready ? "true" : "false") + ",";
   json += "\"tempValid\":" + String(tempValid ? "true" : "false") + ",";
   if (tempValid)
@@ -230,7 +228,7 @@ static void handleStatusData(void)
   json += "\"ph\":" + String(phValue, 2) + ",";
   json += "\"doRawAdc\":" + String((unsigned long)doReading.rawAdc) + ",";
   json += "\"doVoltagePinV\":" + String(doReading.voltagePin, 3) + ",";
-  json += "\"doVoltagePinMv\":" + String((long)(doReading.voltagePin * 1000.0f + 0.5f)) + ",";
+  json += "\"doVoltagePinMv\":" + String((unsigned long)adcRawToMillivolts(doReading.rawAdc)) + ",";
   json += "\"doVoltageModuleEstV\":" + String(doReading.voltageModuleEst, 3) + ",";
   json += "\"doVoltageModuleEstMv\":" + String((long)(doReading.voltageModuleEst * 1000.0f + 0.5f)) + ",";
   json += "\"doTempC\":" + String((int)doTempC) + ",";
@@ -268,7 +266,7 @@ static void handleStatusRoot(void)
       "let t='';"
       "t+=r('WiFi',j.wifi);if(j.ssid)t+=r('SSID',j.ssid);if(j.ip)t+=r('IP',j.ip);"
       "if(j.rssi!==undefined)t+=r('RSSI (dBm)',j.rssi);if(j.mac)t+=r('MAC',j.mac);"
-      "t+=r('API URL (Pi Wi‑Fi)',j.apiUrl);t+=r('Cycle',j.cycleId);t+=r('DS18B20 ready',j.ds18b20Ready);"
+      "t+=r('API URL (Pi Wi‑Fi)',j.apiUrl);t+=r('DS18B20 ready',j.ds18b20Ready);"
       "t+=r('Temp valid',j.tempValid);t+=r('Water °C',j.waterTemperatureC);t+=r('pH',j.ph);"
       "t+=r('DO raw ADC (GPIO35)',j.doRawAdc);t+=r('DO V @ pin',j.doVoltagePinV);t+=r('DO mV @ pin',j.doVoltagePinMv);"
       "t+=r('DO V @ module (est)',j.doVoltageModuleEstV);t+=r('DO mV @ module (est)',j.doVoltageModuleEstMv);"
@@ -325,6 +323,13 @@ static DoReading readDoRaw()
   return r;
 }
 
+static uint32_t adcRawToMillivolts(uint32_t rawAdc)
+{
+  // ESP32 equivalent of Arduino-style: raw * VREF / ADC_RES
+  // Here: VREF=3300mV and ADC_RES=4095 for 12-bit ADC.
+  return (uint32_t)((rawAdc * 3300.0f) / 4095.0f + 0.5f);
+}
+
 static uint16_t doComputeMgLx1000(uint32_t voltageModuleMv, uint8_t temperatureC)
 {
   if (temperatureC > 40)
@@ -372,8 +377,6 @@ static void runMonitoringHttpPost(const TxJob &job, TxResult *out)
   http.addHeader("Content-Type", "application/json");
 
   String body = "{";
-  body += "\"cycleId\":\"" + String(CYCLE_ID) + "\",";
-  body += "\"cycleStartDate\":\"" + String(CYCLE_START_DATE) + "\",";
   if (job.tempValid)
     body += "\"waterTemperature\":" + String(job.tempC, 2) + ",";
   else
@@ -681,7 +684,7 @@ void loop(void)
     DBG_PRINTF("pH: %.2f\n", phValue);
     DBG_PRINTF("DO sample -> raw:\t%lu\tVoltage(mV)\t%lu\n",
                doReading.rawAdc,
-               (unsigned long)(doReading.voltagePin * 1000.0f + 0.5f));
+               (unsigned long)adcRawToMillivolts(doReading.rawAdc));
     DBG_PRINTF("DO GPIO%d: raw=%lu | pin=%.3fV (%lumV) | module(est)=%.3fV (%lumV) | "
                "T=%uC | DO=%.3f mg/L (cal)\n",
                DO_ADC_PIN,

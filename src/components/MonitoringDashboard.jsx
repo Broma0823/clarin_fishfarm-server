@@ -306,8 +306,9 @@ export const MonitoringDashboardContent = ({
   const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   const currentDate = now.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
 
-  // ESP32 is considered offline if no reading exists or last reading is older than 30 seconds
-  const ESP32_TIMEOUT_MS = 30000
+  // ESP32 is considered offline if no reading exists or last reading is older than 90 seconds.
+  // Device upload interval is currently 60 seconds, so this allows normal jitter/network delay.
+  const ESP32_TIMEOUT_MS = 90000
   const esp32Connected = (() => {
     if (!lastDeviceReadingTime || !deviceReadings) return false
     const ageMs = now.getTime() - new Date(lastDeviceReadingTime).getTime()
@@ -330,6 +331,14 @@ export const MonitoringDashboardContent = ({
   const filteredParameters = currentCycleId
     ? monitoringParameters.filter(p => p.cycle_id === currentCycleId)
     : monitoringParameters
+
+  const storedSensorRows = filteredParameters
+    .filter((p) =>
+      p.waterTemperature !== null && p.waterTemperature !== undefined &&
+      p.phLevel !== null && p.phLevel !== undefined &&
+      p.dissolvedOxygen !== null && p.dissolvedOxygen !== undefined
+    )
+    .slice(0, 15)
 
   return (
     <section className="panel">
@@ -731,6 +740,74 @@ export const MonitoringDashboardContent = ({
           </div>
         </div>
       )}
+
+      {/* Stored Sensor Data Table (PostgreSQL) */}
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '1.5rem',
+        marginBottom: '2rem',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+      }}>
+        <div style={{ marginBottom: '1rem' }}>
+          <h3 style={{
+            margin: 0,
+            fontSize: '1.25rem',
+            fontWeight: '600',
+            color: '#1a202c'
+          }}>
+            Stored Sensor Data (PostgreSQL)
+          </h3>
+          <p style={{
+            margin: '0.4rem 0 0 0',
+            fontSize: '0.85rem',
+            color: '#64748b'
+          }}>
+            Latest stored readings with timestamps for documentation and validation.
+          </p>
+        </div>
+
+        {storedSensorRows.length === 0 ? (
+          <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>
+            No stored sensor readings found yet.
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '760px' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                  <th style={{ textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Timestamp</th>
+                  <th style={{ textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Cycle ID</th>
+                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Temperature (°C)</th>
+                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>pH</th>
+                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>DO (mg/L)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {storedSensorRows.map((row) => (
+                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.6rem 0.65rem', fontSize: '0.82rem', color: '#1f2937' }}>
+                      {row.recordedAt ? new Date(row.recordedAt).toLocaleString() : '—'}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.65rem', fontSize: '0.82rem', color: '#1f2937' }}>
+                      {row.cycleId || '—'}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.65rem', textAlign: 'right', fontSize: '0.82rem', color: '#1f2937' }}>
+                      {Number(row.waterTemperature).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.65rem', textAlign: 'right', fontSize: '0.82rem', color: '#1f2937' }}>
+                      {Number(row.phLevel).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.65rem', textAlign: 'right', fontSize: '0.82rem', color: '#1f2937' }}>
+                      {Number(row.dissolvedOxygen).toFixed(3)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Latest User-Inputted Parameters Display */}
       {(() => {

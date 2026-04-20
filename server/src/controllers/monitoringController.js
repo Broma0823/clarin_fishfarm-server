@@ -120,6 +120,12 @@ export const createMonitoringParameter = async (req, res, next) => {
       if (activeCycle.rows.length > 0) {
         resolvedCycleId = activeCycle.rows[0].cycle_id
         resolvedStartDate = activeCycle.rows[0].cycle_start_date
+      } else {
+        // No active cycle: still store sensor readings as uncategorized rows.
+        // cycle_id / cycle_start_date / cycle_end_date stay NULL.
+        resolvedCycleId = null
+        resolvedStartDate = null
+        resolvedEndDate = null
       }
     }
 
@@ -271,6 +277,33 @@ export const deleteMonitoringParameter = async (req, res, next) => {
     }
     
     res.json({ message: 'Monitoring parameter deleted successfully' })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const deleteCycle = async (req, res, next) => {
+  try {
+    const { cycleId } = req.params
+    if (!cycleId) {
+      return res.status(400).json({ error: 'cycleId is required' })
+    }
+
+    const result = await query(
+      `DELETE FROM monitoring_parameters
+       WHERE cycle_id = $1
+       RETURNING id`,
+      [cycleId]
+    )
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: `Cycle ${cycleId} not found` })
+    }
+
+    res.json({
+      message: `Cycle ${cycleId} deleted successfully`,
+      deletedRecords: result.rowCount,
+    })
   } catch (error) {
     next(error)
   }

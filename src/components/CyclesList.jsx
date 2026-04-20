@@ -10,6 +10,8 @@ export const CyclesListContent = ({ onBack, onViewCycle, refreshTrigger }) => {
   const [endingCycle, setEndingCycle] = useState(null)
   const [endCycleForm, setEndCycleForm] = useState({ totalFry: '', notes: '' })
   const [isSubmittingEnd, setIsSubmittingEnd] = useState(false)
+  const [deletingCycleId, setDeletingCycleId] = useState(null)
+  const [cycleDeleteCandidate, setCycleDeleteCandidate] = useState(null)
   const [expandedCycleId, setExpandedCycleId] = useState(null)
 
   useEffect(() => {
@@ -163,6 +165,42 @@ export const CyclesListContent = ({ onBack, onViewCycle, refreshTrigger }) => {
     }
   }
 
+  const performDeleteCycle = async (cycle) => {
+    setDeletingCycleId(cycle.cycleId)
+    try {
+      const response = await fetch(`${API_BASE_URL}/monitoring/cycle/${encodeURIComponent(cycle.cycleId)}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Failed to delete cycle: ${response.status} ${errorText}`)
+      }
+
+      if (expandedCycleId === cycle.cycleId) {
+        setExpandedCycleId(null)
+      }
+
+      await fetchAllCycles()
+    } catch (err) {
+      console.error('Error deleting cycle:', err)
+      alert('Error deleting cycle: ' + err.message)
+    } finally {
+      setDeletingCycleId(null)
+    }
+  }
+
+  const handleDeleteCycle = (cycle) => {
+    setCycleDeleteCandidate(cycle)
+  }
+
+  const confirmDeleteCycle = async () => {
+    if (!cycleDeleteCandidate) return
+    const cycle = cycleDeleteCandidate
+    setCycleDeleteCandidate(null)
+    await performDeleteCycle(cycle)
+  }
+
   const calculateAverage = (records, fieldCamel, fieldSnake) => {
     const values = records
       .map(r => r[fieldCamel] || r[fieldSnake])
@@ -288,16 +326,34 @@ export const CyclesListContent = ({ onBack, onViewCycle, refreshTrigger }) => {
                           background: '#fef3c7', color: '#92400e'
                         }}>Active</span>
                       </div>
-                      <button
-                        onClick={() => { setEndingCycle(cycle); setEndCycleForm({ totalFry: '', notes: '' }) }}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                          color: 'white', border: 'none', borderRadius: '8px',
-                          cursor: 'pointer', fontWeight: '600', fontSize: '0.8rem',
-                          boxShadow: '0 2px 6px rgba(239, 68, 68, 0.3)'
-                        }}
-                      >End Cycle</button>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          onClick={() => { setEndingCycle(cycle); setEndCycleForm({ totalFry: '', notes: '' }) }}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                            color: 'white', border: 'none', borderRadius: '8px',
+                            cursor: 'pointer', fontWeight: '600', fontSize: '0.8rem',
+                            boxShadow: '0 2px 6px rgba(239, 68, 68, 0.3)'
+                          }}
+                        >End Cycle</button>
+                        <button
+                          onClick={() => handleDeleteCycle(cycle)}
+                          disabled={deletingCycleId === cycle.cycleId}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: deletingCycleId === cycle.cycleId ? '#94a3b8' : 'white',
+                            color: deletingCycleId === cycle.cycleId ? 'white' : '#dc2626',
+                            border: '1px solid #fecaca',
+                            borderRadius: '8px',
+                            cursor: deletingCycleId === cycle.cycleId ? 'not-allowed' : 'pointer',
+                            fontWeight: '600',
+                            fontSize: '0.8rem'
+                          }}
+                        >
+                          {deletingCycleId === cycle.cycleId ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                       <div style={{ padding: '0.75rem', background: '#f0f9ff', borderRadius: '8px', fontSize: '0.8rem', lineHeight: '1.7' }}>
@@ -488,10 +544,28 @@ export const CyclesListContent = ({ onBack, onViewCycle, refreshTrigger }) => {
 
                           {/* View Full Details button */}
                           <div style={{ textAlign: 'right', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid #f1f5f9' }}>
-                            <button onClick={(e) => { e.stopPropagation(); onViewCycle && onViewCycle(cycle.cycleId) }} style={{
-                              background: 'transparent', border: 'none', color: '#1A3D64',
-                              fontWeight: '600', fontSize: '0.875rem', cursor: 'pointer'
-                            }}>View Full Details →</button>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteCycle(cycle) }}
+                                disabled={deletingCycleId === cycle.cycleId}
+                                style={{
+                                  background: 'transparent',
+                                  border: '1px solid #fecaca',
+                                  color: deletingCycleId === cycle.cycleId ? '#94a3b8' : '#dc2626',
+                                  fontWeight: '600',
+                                  fontSize: '0.8rem',
+                                  cursor: deletingCycleId === cycle.cycleId ? 'not-allowed' : 'pointer',
+                                  borderRadius: '6px',
+                                  padding: '0.35rem 0.75rem'
+                                }}
+                              >
+                                {deletingCycleId === cycle.cycleId ? 'Deleting...' : 'Delete Cycle'}
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); onViewCycle && onViewCycle(cycle.cycleId) }} style={{
+                                background: 'transparent', border: 'none', color: '#1A3D64',
+                                fontWeight: '600', fontSize: '0.875rem', cursor: 'pointer'
+                              }}>View Full Details →</button>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -633,6 +707,76 @@ export const CyclesListContent = ({ onBack, onViewCycle, refreshTrigger }) => {
                 }}
               >
                 {isSubmittingEnd ? 'Ending Cycle...' : 'Confirm End Cycle'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Cycle Confirmation Modal */}
+      {cycleDeleteCandidate && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100
+          }}
+          onClick={() => setCycleDeleteCandidate(null)}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '14px',
+              width: '90%',
+              maxWidth: '480px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.28)',
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '1rem 1.25rem', background: '#fef2f2', borderBottom: '1px solid #fee2e2' }}>
+              <h3 style={{ margin: 0, color: '#991b1b', fontSize: '1.05rem', fontWeight: '700' }}>Delete Cycle</h3>
+            </div>
+            <div style={{ padding: '1.1rem 1.25rem', color: '#1f2937', lineHeight: 1.55 }}>
+              <p style={{ margin: 0 }}>
+                Delete cycle <strong>{cycleDeleteCandidate.cycleId}</strong> and all its sensor/production records?
+              </p>
+              <p style={{ margin: '0.55rem 0 0', color: '#b91c1c', fontSize: '0.88rem' }}>
+                This action cannot be undone.
+              </p>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', padding: '0.9rem 1.25rem', borderTop: '1px solid #f1f5f9' }}>
+              <button
+                onClick={() => setCycleDeleteCandidate(null)}
+                style={{
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  background: '#f8fafc',
+                  color: '#334155',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteCycle}
+                style={{
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: 'white',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                Delete Cycle
               </button>
             </div>
           </div>

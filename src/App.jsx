@@ -153,6 +153,13 @@ function App() {
   const [showCyclesList, setShowCyclesList] = useState(false)
   const [selectedCycleForSummary, setSelectedCycleForSummary] = useState(null)
   const [cyclesListRefreshTrigger, setCyclesListRefreshTrigger] = useState(0)
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: '',
+    message: '',
+    confirmLabel: 'Delete',
+    onConfirm: null,
+  })
 
   const [newMonitoringRecord, setNewMonitoringRecord] = useState({
     cycleId: '',
@@ -815,9 +822,7 @@ function App() {
     }
   }
 
-  const handleDeleteMonitoringRecord = async (id) => {
-    if (!confirm('Are you sure you want to delete this monitoring record?')) return
-
+  const deleteMonitoringRecord = async (id) => {
     try {
       const response = await fetch(`${API_BASE_URL}/monitoring/${id}`, {
         method: 'DELETE',
@@ -836,6 +841,16 @@ function App() {
       console.error(err)
       setToast(`Error: ${err.message}`)
     }
+  }
+
+  const handleDeleteMonitoringRecord = (id) => {
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Monitoring Record',
+      message: 'Are you sure you want to delete this monitoring record? This action cannot be undone.',
+      confirmLabel: 'Delete Record',
+      onConfirm: () => deleteMonitoringRecord(id),
+    })
   }
 
   const handleLogout = () => {
@@ -871,12 +886,8 @@ function App() {
 
   const closeAddModal = useCallback(() => setShowAddModal(false), [])
 
-  const handleDeleteRecord = useCallback(
+  const deleteRecord = useCallback(
     async (recordId) => {
-      if (!window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-        return
-      }
-
       try {
         const response = await fetch(`${API_BASE_URL}/distributions/${recordId}`, {
           method: 'DELETE',
@@ -906,6 +917,37 @@ function App() {
     },
     [classification, selectedYear, selectedMonth]
   )
+
+  const handleDeleteRecord = useCallback(
+    (recordId) => {
+      setConfirmDialog({
+        open: true,
+        title: 'Delete Beneficiary Record',
+        message: 'Are you sure you want to delete this record? This action cannot be undone.',
+        confirmLabel: 'Delete Record',
+        onConfirm: () => deleteRecord(recordId),
+      })
+    },
+    [deleteRecord]
+  )
+
+  const closeConfirmDialog = () => {
+    setConfirmDialog({
+      open: false,
+      title: '',
+      message: '',
+      confirmLabel: 'Delete',
+      onConfirm: null,
+    })
+  }
+
+  const handleConfirmDialog = async () => {
+    const action = confirmDialog.onConfirm
+    closeConfirmDialog()
+    if (typeof action === 'function') {
+      await action()
+    }
+  }
 
   const handleEditRecord = useCallback((record) => {
     setEditingRecord(record)
@@ -2594,6 +2636,80 @@ function App() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {confirmDialog.open && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15, 23, 42, 0.55)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1200,
+            }}
+            onClick={closeConfirmDialog}
+          >
+            <div
+              style={{
+                width: '90%',
+                maxWidth: '500px',
+                background: 'white',
+                borderRadius: '14px',
+                boxShadow: '0 20px 52px rgba(0,0,0,0.28)',
+                overflow: 'hidden',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ padding: '1rem 1.25rem', background: '#fef2f2', borderBottom: '1px solid #fee2e2' }}>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#991b1b', fontWeight: '700' }}>
+                  {confirmDialog.title}
+                </h3>
+              </div>
+              <div style={{ padding: '1.1rem 1.25rem', color: '#1f2937', lineHeight: 1.55 }}>
+                <p style={{ margin: 0 }}>{confirmDialog.message}</p>
+              </div>
+              <div
+                style={{
+                  padding: '0.9rem 1.25rem',
+                  borderTop: '1px solid #f1f5f9',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '0.6rem',
+                }}
+              >
+                <button
+                  onClick={closeConfirmDialog}
+                  style={{
+                    padding: '0.5rem 0.9rem',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                    background: '#f8fafc',
+                    color: '#334155',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDialog}
+                  style={{
+                    padding: '0.5rem 0.9rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                    color: 'white',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {confirmDialog.confirmLabel}
+                </button>
+              </div>
             </div>
           </div>
         )}
