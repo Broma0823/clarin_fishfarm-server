@@ -1,0 +1,32 @@
+flowchart LR
+    %% ---------- Field Layer ----------
+    subgraph FIELD["Pond / Sensor Layer"]
+        T["DS18B20"]
+        PH["pH Sensor"]
+        DO["DO Sensor"]
+        ESP["ESP32"]
+        T --> ESP
+        PH --> ESP
+        DO --> ESP
+    end
+
+    %% ---------- Network ----------
+    NET["Wi-Fi Network"]
+
+    %% ---------- Server Layer ----------
+    subgraph SERVER["Raspberry Pi Server"]
+        WEB["React Frontend (:5173)"]
+        API["Express API (:4000)"]
+        DB[("PostgreSQL (bfar_db)")]
+
+        WEB -->|"GET/POST"| API
+        API -->|"JSON"| WEB
+        API -->|"Read/Write"| DB
+        DB -->|"Results"| API
+    end
+
+    %% ---------- User Layer ----------
+    USER["User (Laptop / Mobile Browser)"]
+
+    ESP -->|"POST /api/monitoring (every 60s)"| NET --> API
+    USER -->|"Open dashboard"| WEB
