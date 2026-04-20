@@ -773,14 +773,14 @@ export const MonitoringDashboardContent = ({
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '760px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '760px', tableLayout: 'fixed' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Timestamp</th>
-                  <th style={{ textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Cycle ID</th>
-                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Temperature (°C)</th>
-                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>pH</th>
-                  <th style={{ textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>DO (mg/L)</th>
+                  <th style={{ width: '34%', textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Timestamp</th>
+                  <th style={{ width: '18%', textAlign: 'left', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Cycle ID</th>
+                  <th style={{ width: '18%', textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>Temperature (°C)</th>
+                  <th style={{ width: '12%', textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>pH</th>
+                  <th style={{ width: '18%', textAlign: 'right', padding: '0.65rem', fontSize: '0.8rem', color: '#475569' }}>DO (mg/L)</th>
                 </tr>
               </thead>
               <tbody>
@@ -789,7 +789,17 @@ export const MonitoringDashboardContent = ({
                     <td style={{ padding: '0.6rem 0.65rem', fontSize: '0.82rem', color: '#1f2937' }}>
                       {row.recordedAt ? new Date(row.recordedAt).toLocaleString() : '—'}
                     </td>
-                    <td style={{ padding: '0.6rem 0.65rem', fontSize: '0.82rem', color: '#1f2937' }}>
+                    <td
+                      style={{
+                        padding: '0.6rem 0.65rem',
+                        fontSize: '0.82rem',
+                        color: '#1f2937',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={row.cycleId || '—'}
+                    >
                       {row.cycleId || '—'}
                     </td>
                     <td style={{ padding: '0.6rem 0.65rem', textAlign: 'right', fontSize: '0.82rem', color: '#1f2937' }}>
