@@ -54,10 +54,10 @@ static unsigned long wifiReconnectBackoffMs()
 }
 
 #ifndef FISHFARM_API_URL
-#define FISHFARM_API_URL "http://192.168.1.20:4000/api/monitoring"
+#define FISHFARM_API_URL "http://192.168.1.6:4000/api/monitoring"
 #endif
 
-const unsigned long SAMPLE_INTERVAL_MS = 60000UL;
+const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
 unsigned long lastSampleMs = 0;
 
 #define DEBUG_PRINT_INTERVAL_MS 3000UL
@@ -69,8 +69,6 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 static bool gDs18b20Ready = false;
 
-// ESP32 ADC1 @ ADC_11db: ~0–3.3 V full scale, 12-bit (0–4095). pH uses GPIO34, DO uses GPIO35.
-// pH keeps the original 2k2/3k divider. DO is currently wired DIRECT (no divider): module V == pin V.
 static const int PH_ADC_PIN = 34;
 static const int DO_ADC_PIN = 35;
 static const float ADC_VREF = 3.3f;
@@ -85,9 +83,7 @@ static const float DO_DIVIDER_SCALE =
     (DO_R_DIV_TOP_OHMS + DO_R_DIV_BOTTOM_OHMS) / DO_R_DIV_BOTTOM_OHMS;
 static float phCalibrationValue = 21.00f - 1.00f;
 
-// Dissolved oxygen (DO) calibration (ported from common Arduino samples, adapted for ESP32).
-// The DO algorithm expects the *sensor module output voltage* in millivolts (mv), and a temperature in °C (0–40).
-// We estimate module voltage from the ADC pin voltage using the same divider scale.
+
 #ifndef DO_TWO_POINT_CALIBRATION
 #define DO_TWO_POINT_CALIBRATION 1
 #endif

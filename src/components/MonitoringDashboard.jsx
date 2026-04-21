@@ -296,6 +296,7 @@ export const MonitoringDashboardContent = ({
   lastDeviceReadingTime,
 }) => {
   const [currentTimeState, setCurrentTimeState] = useState(new Date())
+  const [alertsEnabled, setAlertsEnabled] = useState(true)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTimeState(new Date()), 1000)
@@ -323,6 +324,65 @@ export const MonitoringDashboardContent = ({
     return `${Math.floor(ageMs / 3600000)}h ago`
   })()
 
+  const severeAlerts = (() => {
+    if (!deviceReadings) return []
+    const alerts = []
+
+    const temp = deviceReadings.waterTemperature
+    if (temp !== null && temp !== undefined) {
+      if (temp < 24) {
+        alerts.push({
+          key: 'temp-low',
+          label: 'Water Temperature',
+          severity: 'critical',
+          message: `Critically low water temperature (${temp.toFixed(2)}°C).`,
+        })
+      } else if (temp > 32) {
+        alerts.push({
+          key: 'temp-high',
+          label: 'Water Temperature',
+          severity: 'critical',
+          message: `Critically high water temperature (${temp.toFixed(2)}°C).`,
+        })
+      }
+    }
+
+    const ph = deviceReadings.phLevel
+    if (ph !== null && ph !== undefined) {
+      if (ph < 6.0) {
+        alerts.push({
+          key: 'ph-low',
+          label: 'pH Level',
+          severity: 'warning',
+          message: `Water is too acidic (pH ${ph.toFixed(2)}).`,
+        })
+      } else if (ph > 9.0) {
+        alerts.push({
+          key: 'ph-high',
+          label: 'pH Level',
+          severity: 'warning',
+          message: `Water is too alkaline (pH ${ph.toFixed(2)}).`,
+        })
+      }
+    }
+
+    const doValue = deviceReadings.dissolvedOxygen
+    if (doValue !== null && doValue !== undefined) {
+      if (doValue < 4.0) {
+        alerts.push({
+          key: 'do-low',
+          label: 'Dissolved Oxygen',
+          severity: 'critical',
+          message: `Dissolved oxygen is critically low (${doValue.toFixed(2)} mg/L).`,
+        })
+      }
+    }
+
+    return alerts
+  })()
+  const hasCriticalAlert = severeAlerts.some((a) => a.severity === 'critical')
+  const hasAnyAlert = severeAlerts.length > 0
+
   const nextCollection = esp32Connected ? new Date(now.getTime() + 10000) : null
   const nextTime = nextCollection ? nextCollection.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'
   const nextDate = nextCollection ? nextCollection.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
@@ -341,7 +401,86 @@ export const MonitoringDashboardContent = ({
     .slice(0, 15)
 
   return (
-    <section className="panel">
+    <section className="panel" style={{ position: 'relative' }}>
+      {alertsEnabled && hasAnyAlert && (
+        <>
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: hasCriticalAlert ? 'rgba(220, 38, 38, 0.18)' : 'rgba(245, 158, 11, 0.12)',
+              zIndex: 800,
+              pointerEvents: 'none',
+              animation: hasCriticalAlert
+                ? 'criticalOverlayPulse 1.1s ease-in-out infinite'
+                : 'warningOverlayPulse 1.4s ease-in-out infinite',
+            }}
+          />
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: '18px',
+              background: hasCriticalAlert
+                ? 'linear-gradient(90deg, rgba(220,38,38,0.9) 0%, rgba(220,38,38,0) 100%)'
+                : 'linear-gradient(90deg, rgba(245,158,11,0.88) 0%, rgba(245,158,11,0) 100%)',
+              zIndex: 810,
+              pointerEvents: 'none',
+              animation: hasCriticalAlert ? 'sideAlertPulseStrong 0.9s ease-in-out infinite' : 'sideAlertPulse 1.2s ease-in-out infinite',
+            }}
+          />
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: '18px',
+              background: hasCriticalAlert
+                ? 'linear-gradient(270deg, rgba(220,38,38,0.9) 0%, rgba(220,38,38,0) 100%)'
+                : 'linear-gradient(270deg, rgba(245,158,11,0.88) 0%, rgba(245,158,11,0) 100%)',
+              zIndex: 810,
+              pointerEvents: 'none',
+              animation: hasCriticalAlert ? 'sideAlertPulseStrong 0.9s ease-in-out infinite' : 'sideAlertPulse 1.2s ease-in-out infinite',
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: '88px',
+              right: '22px',
+              zIndex: 820,
+              maxWidth: '360px',
+              borderRadius: '12px',
+              padding: '0.85rem 1rem',
+              border: hasCriticalAlert ? '2px solid #ef4444' : '2px solid #f59e0b',
+              background: hasCriticalAlert
+                ? 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%)'
+                : 'linear-gradient(135deg, #92400e 0%, #b45309 100%)',
+              color: 'white',
+              boxShadow: hasCriticalAlert
+                ? '0 12px 28px rgba(239,68,68,0.45)'
+                : '0 10px 24px rgba(245,158,11,0.42)',
+              animation: hasCriticalAlert ? 'floatAlertShake 0.9s ease-in-out infinite' : 'floatAlertPulse 1.6s ease-in-out infinite',
+            }}
+          >
+            <div style={{ fontSize: '0.78rem', fontWeight: 800, letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+              {hasCriticalAlert ? 'Critical Warning' : 'Water Quality Warning'}
+            </div>
+            <div style={{ marginTop: '0.25rem', fontSize: '0.93rem', fontWeight: 700, lineHeight: 1.3 }}>
+              Parameters are off optimal range.
+            </div>
+            <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', opacity: 0.92 }}>
+              Review alerts below or tap “Turn Off Alerts”.
+            </div>
+          </div>
+        </>
+      )}
       <header className="panel-header" style={{ marginBottom: '2rem' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '1.75rem', fontWeight: '700', color: '#1a202c' }}>
@@ -571,6 +710,42 @@ export const MonitoringDashboardContent = ({
               </p>
             )}
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              fontSize: '0.75rem',
+              fontWeight: '700',
+              color: alertsEnabled ? '#166534' : '#991b1b',
+              background: alertsEnabled ? '#dcfce7' : '#fee2e2',
+              border: `1px solid ${alertsEnabled ? '#86efac' : '#fecaca'}`,
+              padding: '0.35rem 0.65rem',
+              borderRadius: '999px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              Alerts {alertsEnabled ? 'Enabled' : 'Disabled'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlertsEnabled((v) => !v)}
+              style={{
+                border: 'none',
+                borderRadius: '8px',
+                padding: '0.55rem 0.95rem',
+                fontSize: '0.8rem',
+                fontWeight: '700',
+                cursor: 'pointer',
+                color: 'white',
+                background: alertsEnabled
+                  ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+                  : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                boxShadow: alertsEnabled
+                  ? '0 2px 8px rgba(239,68,68,0.35)'
+                  : '0 2px 8px rgba(22,163,74,0.35)'
+              }}
+            >
+              {alertsEnabled ? 'Turn Off Alerts' : 'Turn On Alerts'}
+            </button>
+          </div>
         </div>
 
         {/* Offline banner */}
@@ -598,6 +773,60 @@ export const MonitoringDashboardContent = ({
                 Ensure the ESP32 is powered on, connected to WiFi, and sending data to the server.
                 {deviceReadings && ' Showing last known readings below.'}
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Automated Alert Banner */}
+        {alertsEnabled && severeAlerts.length > 0 && (
+          <div style={{
+            marginBottom: '1.2rem',
+            borderRadius: '14px',
+            border: hasCriticalAlert ? '2px solid #ef4444' : '2px solid #f59e0b',
+            background: hasCriticalAlert
+              ? 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)'
+              : 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+            boxShadow: hasCriticalAlert
+              ? '0 10px 24px rgba(239, 68, 68, 0.20)'
+              : '0 10px 22px rgba(245, 158, 11, 0.20)',
+            padding: '1.05rem 1.2rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.7rem' }}>
+              <p style={{ margin: 0, fontSize: '0.92rem', fontWeight: '800', color: '#7f1d1d', letterSpacing: '0.35px' }}>
+                AUTOMATED ALERT: UNFAVORABLE WATER CONDITIONS DETECTED
+              </p>
+              <span style={{
+                fontSize: '0.72rem',
+                fontWeight: '700',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: hasCriticalAlert ? '#991b1b' : '#9a3412',
+                background: hasCriticalAlert ? '#fecaca' : '#fed7aa',
+                border: `1px solid ${hasCriticalAlert ? '#fca5a5' : '#fdba74'}`,
+                borderRadius: '999px',
+                padding: '0.2rem 0.55rem'
+              }}>
+                {hasCriticalAlert ? 'Critical' : 'Warning'}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {severeAlerts.map((alert) => (
+                <div
+                  key={alert.key}
+                  style={{
+                    background: 'rgba(255,255,255,0.88)',
+                    border: `1px solid ${alert.severity === 'critical' ? '#f87171' : '#fca5a5'}`,
+                    borderRadius: '8px',
+                    padding: '0.6rem 0.72rem',
+                    color: '#7f1d1d',
+                    fontSize: '0.84rem',
+                    fontWeight: '600',
+                    lineHeight: 1.35
+                  }}
+                >
+                  <strong>{alert.label}:</strong> {alert.message}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -1131,6 +1360,31 @@ export const MonitoringDashboardContent = ({
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        @keyframes criticalOverlayPulse {
+          0%, 100% { opacity: 0.28; }
+          50% { opacity: 0.12; }
+        }
+        @keyframes warningOverlayPulse {
+          0%, 100% { opacity: 0.2; }
+          50% { opacity: 0.08; }
+        }
+        @keyframes sideAlertPulse {
+          0%, 100% { opacity: 0.88; }
+          50% { opacity: 0.38; }
+        }
+        @keyframes sideAlertPulseStrong {
+          0%, 100% { opacity: 0.95; }
+          50% { opacity: 0.28; }
+        }
+        @keyframes floatAlertPulse {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        @keyframes floatAlertShake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-2px); }
+          75% { transform: translateX(2px); }
         }
       `}</style>
     </section>
