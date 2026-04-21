@@ -23,12 +23,39 @@
 #define DBG_PRINTF(...)
 #endif
 
-const char *WIFI_SSID = "Candog";
-const char *WIFI_PASSWORD = "Qwerty12345-";
-const char *WIFI_SSID_2 = "iPhone";
-const char *WIFI_PASSWORD_2 = "12345678";
+const char *WIFI_SSID = "iPhone";
+const char *WIFI_PASSWORD = "12345678";
 
 WiFiMulti wifiMulti;
+
+// Defense mode: use fixed IP on iPhone hotspot.
+// iPhone hotspot network here is 172.20.10.0/28 (gateway 172.20.10.1).
+#ifndef WIFI_USE_IPHONE_STATIC
+#define WIFI_USE_IPHONE_STATIC 1
+#endif
+
+#if WIFI_USE_IPHONE_STATIC
+static const IPAddress WIFI_STATIC_IP(172, 20, 10, 11); // choose an unused host in /28
+static const IPAddress WIFI_GATEWAY(172, 20, 10, 1);
+static const IPAddress WIFI_SUBNET(255, 255, 255, 240);
+static const IPAddress WIFI_DNS1(8, 8, 8, 8);
+static const IPAddress WIFI_DNS2(1, 1, 1, 1);
+
+static void applyStaticWiFiConfig()
+{
+  if (!WiFi.config(WIFI_STATIC_IP, WIFI_GATEWAY, WIFI_SUBNET, WIFI_DNS1, WIFI_DNS2))
+  {
+    DBG_PRINTLN("[WiFi] Static IP config failed; will continue with DHCP behavior.");
+  }
+  else
+  {
+    DBG_PRINTF("[WiFi] Static IP target: %s  gw=%s  mask=%s\n",
+               WIFI_STATIC_IP.toString().c_str(),
+               WIFI_GATEWAY.toString().c_str(),
+               WIFI_SUBNET.toString().c_str());
+  }
+}
+#endif
 
 #define WIFI_CHECK_INTERVAL_MS 5000UL
 #define WIFI_RECONNECT_BASE_MS 2000UL
@@ -53,8 +80,9 @@ static unsigned long wifiReconnectBackoffMs()
   return ms;
 }
 
+//"http://192.168.1.6:4000/api/monitoring"
 #ifndef FISHFARM_API_URL
-#define FISHFARM_API_URL "http://192.168.1.6:4000/api/monitoring"
+#define FISHFARM_API_URL "http://172.20.10.10:4000/api/monitoring"
 #endif
 
 const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
@@ -453,8 +481,13 @@ static void registerWifiNetworks()
   static bool registered = false;
   if (registered)
     return;
+#if WIFI_USE_IPHONE_STATIC
+  // Single SSID + static IP; do not mix with home Wi‑Fi or quick-reconnect will
+  // rejoin the last stored AP (e.g. Candog) from NVS.
   wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
-  wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
+#else
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
+#endif
   registered = true;
 }
 
@@ -483,14 +516,30 @@ bool smartWiFiConnect()
 
   if (WiFi.status() == WL_CONNECTED)
   {
-    wifiReconnectFailCount = 0;
-    return true;
+#if WIFI_USE_IPHONE_STATIC
+    if (WiFi.SSID() != String(WIFI_SSID))
+    {
+      DBG_PRINTF("[WiFi] On wrong AP \"%s\" (want \"%s\"); disconnect + erase stored AP\n",
+                 WiFi.SSID().c_str(), WIFI_SSID);
+      WiFi.disconnect(true, true);
+      delay(200);
+    }
+    else
+#endif
+    {
+      wifiReconnectFailCount = 0;
+      return true;
+    }
   }
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(WIFI_PS_NONE);
+#if WIFI_USE_IPHONE_STATIC
+  applyStaticWiFiConfig();
+#endif
 
+#if !WIFI_USE_IPHONE_STATIC
   DBG_PRINTLN("[WiFi] Quick reconnect (same AP)...");
   WiFi.reconnect();
   {
@@ -506,13 +555,22 @@ bool smartWiFiConnect()
     DBG_PRINTLN(WiFi.SSID());
     return true;
   }
+#endif
 
   DBG_PRINTLN("[WiFi] Full reconnect via WiFiMulti...");
+#if WIFI_USE_IPHONE_STATIC
+  // true, true: drop link and clear stored SSID so we never auto-rejoin old AP.
+  WiFi.disconnect(true, true);
+#else
   WiFi.disconnect(true);
+#endif
   delay(200);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(WIFI_PS_NONE);
+#if WIFI_USE_IPHONE_STATIC
+  applyStaticWiFiConfig();
+#endif
 
   int tries = 0;
   while (wifiMulti.run() != WL_CONNECTED && tries < WIFI_FULL_CONNECT_TRIES)

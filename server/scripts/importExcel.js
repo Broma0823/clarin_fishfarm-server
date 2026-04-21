@@ -116,6 +116,14 @@ const isGenderCell = (value) => {
   return s === 'male' || s === 'female' || s === 'm' || s === 'f'
 }
 
+const FOOTER_KEYWORDS = ['prepared', 'noted by', 'summary']
+
+const isFooterName = (value) => {
+  const s = String(value ?? '').trim().toLowerCase()
+  if (!s) return false
+  return FOOTER_KEYWORDS.some((kw) => s.includes(kw))
+}
+
 /** Stable key: one beneficiary row per person + location (re-import safe). */
 const beneficiaryExcelId = (fullName, barangay, municipality) => {
   const parts = [
@@ -228,19 +236,9 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     implementation_type = row[9] ?? null
     satisfaction = row[10] ?? null
   } else if (row[1] && (row[6] != null || row[7] != null || row[8] != null)) {
-    // Fallback for organization-like rows in regular monthly sheets where gender is blank.
-    fullName = String(row[1] ?? '').trim()
-    gender = 'N/A'
-    barangay = row[3] ?? null
-    municipality = row[4] ?? null
-    contact = row[5] ?? null
-    species = row[6] ?? null
-    const parsedQuantity = parseQuantityCell(row[7])
-    quantity = parsedQuantity?.quantity ?? null
-    quantity_unit = parsedQuantity?.quantityUnit ?? 'pcs'
-    cost = toNumber(row[8]) ? toNumber(row[8]) * 1000 : null
-    implementation_type = row[9] ?? null
-    satisfaction = row[10] ?? null
+    // Regular monthly tabs should only contain individual records with explicit gender.
+    // Group/organization rows are imported from "(Group)/(Groups)" sheets to avoid duplicates.
+    return null
   } else {
     return null
   }
@@ -248,6 +246,14 @@ const normalizeRow = (row, sheetName, rowIndex) => {
   if (!fullName || !gender) {
     return null
   }
+
+  if (isFooterName(fullName)) return null
+
+  const dateImplemented = buildDate(row[0], sheetName)
+  if (!dateImplemented) return null
+
+  const speciesText = String(species ?? '').trim()
+  if (!speciesText || quantity == null) return null
 
   const nameForDb = normalizeName(String(fullName).trim()) || String(fullName).trim().replace(/\s+/g, ' ')
   const benId = beneficiaryExcelId(nameForDb, barangay, municipality)
@@ -262,13 +268,13 @@ const normalizeRow = (row, sheetName, rowIndex) => {
     barangay,
     municipality,
     contact,
-    species,
+    species: speciesText,
     quantity,
     quantity_unit,
     cost,
     implementation_type,
     satisfaction,
-    date_implemented: buildDate(row[0], sheetName),
+    date_implemented: dateImplemented,
   }
 }
 

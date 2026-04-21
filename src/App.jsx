@@ -25,7 +25,16 @@ const findAllowedUser = (login, password) =>
 const resolveKnownLogin = (login) =>
   ALLOWED_USERS.find((u) => normalizeLogin(u.login) === normalizeLogin(login))?.login ?? null
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api'
+const resolveApiBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (configured) return configured
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:4000/api`
+  }
+  return 'http://localhost:4000/api'
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
 
 const SESSION_STORAGE_KEY = 'bfar_fishfarm_session'
 
@@ -209,8 +218,15 @@ function App() {
 
         const response = await fetch(
           `${API_BASE_URL}/distributions?${params.toString()}`,
-          { signal: controller.signal }
+          {
+            signal: controller.signal,
+            cache: 'no-store',
+          }
         )
+        if (response.status === 304) {
+          setToast('')
+          return
+        }
         const payload = await response.json()
         if (!response.ok) {
           throw new Error(payload.error || 'Unable to load records')
@@ -234,23 +250,24 @@ function App() {
   const bootstrapSummary = async () => {
     setLoadingSummary(true)
     setLoadingBreakdown(true)
+    let hasAnySuccess = false
     try {
-      const [summaryRes, productionRes, breakdownRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/stats/summary`),
-        fetch(`${API_BASE_URL}/stats/production`),
-        fetch(`${API_BASE_URL}/stats/breakdown`),
-      ])
-
+      const summaryRes = await fetch(`${API_BASE_URL}/stats/summary`, { cache: 'no-store' })
       if (summaryRes.ok) {
         const summaryPayload = await summaryRes.json()
         setSummary(summaryPayload.data?.totals ?? null)
-      } else {
-        setSummary(null)
+        hasAnySuccess = true
       }
+    } catch (err) {
+      console.error('Summary API request failed:', err)
+    }
 
+    try {
+      const productionRes = await fetch(`${API_BASE_URL}/stats/production`, { cache: 'no-store' })
       if (productionRes.ok) {
         const productionPayload = await productionRes.json()
         const apiProduction = productionPayload.data ?? []
+        hasAnySuccess = true
 
         // Create a set of existing dates from API data (normalize to YYYY-MM format)
         const existingDates = new Set()
@@ -424,24 +441,28 @@ function App() {
         }
         setProduction(placeholderActual)
       }
+    } catch (err) {
+      console.error('Production API request failed:', err)
+    }
 
+    try {
+      const breakdownRes = await fetch(`${API_BASE_URL}/stats/breakdown`, { cache: 'no-store' })
       if (breakdownRes.ok) {
         const breakdownPayload = await breakdownRes.json()
         setBreakdown(breakdownPayload.data ?? null)
-      } else {
-        setBreakdown(null)
+        hasAnySuccess = true
       }
-      setToast('')
     } catch (err) {
-      console.error(err)
-      setToast('Could not reach analytics API. Using fallback stats.')
-      setSummary(null)
-      setProduction([])
-      setBreakdown(null)
-    } finally {
-      setLoadingSummary(false)
-      setLoadingBreakdown(false)
+      console.error('Breakdown API request failed:', err)
     }
+
+    if (hasAnySuccess) {
+      setToast('')
+    } else {
+      setToast('Could not reach analytics API. Using fallback stats.')
+    }
+    setLoadingSummary(false)
+    setLoadingBreakdown(false)
   }
 
   useEffect(() => {

@@ -1,7 +1,16 @@
 // Cycle Summary Component - Displays comprehensive cycle information
 import { useState, useEffect } from 'react'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api'
+const resolveApiBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (configured) return configured
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:4000/api`
+  }
+  return 'http://localhost:4000/api'
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
 
 export const CycleSummaryContent = ({ cycleId, onBack }) => {
   const [cycleData, setCycleData] = useState(null)
