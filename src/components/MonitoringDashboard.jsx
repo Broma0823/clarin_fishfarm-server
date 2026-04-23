@@ -792,8 +792,8 @@ export const MonitoringDashboardContent = ({
             padding: '1.05rem 1.2rem'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.7rem' }}>
-              <p style={{ margin: 0, fontSize: '0.92rem', fontWeight: '800', color: '#7f1d1d', letterSpacing: '0.35px' }}>
-                AUTOMATED ALERT: UNFAVORABLE WATER CONDITIONS DETECTED
+              <p style={{ margin: 0, fontSize: '0.92rem', fontWeight: '800', color: '#7f1d1d', letterSpacing: '0.02em' }}>
+                {hasCriticalAlert ? 'Critical reading' : 'Out of range'}
               </p>
               <span style={{
                 fontSize: '0.72rem',

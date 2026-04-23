@@ -23,15 +23,15 @@
 #define DBG_PRINTF(...)
 #endif
 
-const char *WIFI_SSID = "iPhone";
-const char *WIFI_PASSWORD = "12345678";
+const char *WIFI_SSID = "Candog";
+const char *WIFI_PASSWORD = "Qwerty12345-";
 
 WiFiMulti wifiMulti;
 
 // Defense mode: use fixed IP on iPhone hotspot.
 // iPhone hotspot network here is 172.20.10.0/28 (gateway 172.20.10.1).
 #ifndef WIFI_USE_IPHONE_STATIC
-#define WIFI_USE_IPHONE_STATIC 1
+#define WIFI_USE_IPHONE_STATIC 0
 #endif
 
 #if WIFI_USE_IPHONE_STATIC
@@ -80,9 +80,9 @@ static unsigned long wifiReconnectBackoffMs()
   return ms;
 }
 
-//"http://192.168.1.6:4000/api/monitoring"
+
 #ifndef FISHFARM_API_URL
-#define FISHFARM_API_URL "http://172.20.10.10:4000/api/monitoring"
+#define FISHFARM_API_URL "http://192.168.1.9:4000/api/monitoring"
 #endif
 
 const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
@@ -150,6 +150,8 @@ struct DoReading
 };
 
 static float readPhLevel(void);
+/** Same trimmed-mean sample as pH math; *outRawAvg is mean ADC count (0–4095) of middle 6 reads. */
+static void readPhSample(float *outPh, uint32_t *outRawAvg);
 static DoReading readDoRaw(void);
 static uint32_t adcRawToMillivolts(uint32_t rawAdc);
 static uint16_t doComputeMgLx1000(uint32_t voltageModuleMv, uint8_t temperatureC);
@@ -223,7 +225,9 @@ static void handleStatusData(void)
     tempValid = (tempC != DEVICE_DISCONNECTED_C);
   }
 
-  const float phValue = readPhLevel();
+  float phValue = 0.0f;
+  uint32_t phRawAdc = 0;
+  readPhSample(&phValue, &phRawAdc);
   const DoReading doReading = readDoRaw();
   const uint8_t doTempC =
       (uint8_t)((tempValid ? (int)lroundf(tempC) : (int)DO_FALLBACK_TEMP_C));
@@ -250,6 +254,7 @@ static void handleStatusData(void)
   else
     json += "\"waterTemperatureC\":null,";
   json += "\"ph\":" + String(phValue, 2) + ",";
+  json += "\"phRawAdc\":" + String((unsigned long)phRawAdc) + ",";
   json += "\"doRawAdc\":" + String((unsigned long)doReading.rawAdc) + ",";
   json += "\"doVoltagePinV\":" + String(doReading.voltagePin, 3) + ",";
   json += "\"doVoltagePinMv\":" + String((unsigned long)adcRawToMillivolts(doReading.rawAdc)) + ",";
@@ -292,6 +297,7 @@ static void handleStatusRoot(void)
       "if(j.rssi!==undefined)t+=r('RSSI (dBm)',j.rssi);if(j.mac)t+=r('MAC',j.mac);"
       "t+=r('API URL (Pi Wi‑Fi)',j.apiUrl);t+=r('DS18B20 ready',j.ds18b20Ready);"
       "t+=r('Temp valid',j.tempValid);t+=r('Water °C',j.waterTemperatureC);t+=r('pH',j.ph);"
+      "t+=r('pH raw ADC (GPIO34)',j.phRawAdc);"
       "t+=r('DO raw ADC (GPIO35)',j.doRawAdc);t+=r('DO V @ pin',j.doVoltagePinV);t+=r('DO mV @ pin',j.doVoltagePinMv);"
       "t+=r('DO V @ module (est)',j.doVoltageModuleEstV);t+=r('DO mV @ module (est)',j.doVoltageModuleEstMv);"
       "t+=r('DO temp (°C)',j.doTempC);t+=r('DO (mg/L)',j.doMgL);"
@@ -305,7 +311,7 @@ static void handleStatusRoot(void)
   statusServer.send_P(200, "text/html", page);
 }
 
-static float readPhLevel()
+static void readPhSample(float *outPh, uint32_t *outRawAvg)
 {
   int buf[10];
   for (int i = 0; i < 10; i++)
@@ -327,9 +333,22 @@ static float readPhLevel()
   for (int i = 2; i < 8; i++)
     avgval += buf[i];
 
-  const float voltAtPin = (float)avgval * (ADC_VREF / ADC_MAX) / 6.0f;
-  const float voltModule = voltAtPin * PH_DIVIDER_SCALE;
-  return -5.70f * voltModule + phCalibrationValue;
+  if (outRawAvg)
+    *outRawAvg = (uint32_t)((avgval + 3UL) / 6UL);
+
+  if (outPh)
+  {
+    const float voltAtPin = (float)avgval * (ADC_VREF / ADC_MAX) / 6.0f;
+    const float voltModule = voltAtPin * PH_DIVIDER_SCALE;
+    *outPh = -5.70f * voltModule + phCalibrationValue;
+  }
+}
+
+static float readPhLevel(void)
+{
+  float ph = 0.0f;
+  readPhSample(&ph, nullptr);
+  return ph;
 }
 
 static DoReading readDoRaw()
@@ -720,7 +739,9 @@ void loop(void)
     tempValid = (tempC != DEVICE_DISCONNECTED_C);
   }
 
-  const float phValue = readPhLevel();
+  float phValue = 0.0f;
+  uint32_t phRawAdc = 0;
+  readPhSample(&phValue, &phRawAdc);
   const DoReading doReading = readDoRaw();
   const uint8_t doTempC =
       (uint8_t)((tempValid ? (int)lroundf(tempC) : (int)DO_FALLBACK_TEMP_C));
@@ -735,7 +756,8 @@ void loop(void)
       DBG_PRINTLN("Temp: (disconnected)");
     else
       DBG_PRINTF("Temp: %.2f C (%.2f F)\n", tempC, DallasTemperature::toFahrenheit(tempC));
-    DBG_PRINTF("pH: %.2f\n", phValue);
+    DBG_PRINTF("pH GPIO%d: raw ADC (trimmed mean) = %lu | pH = %.2f\n",
+               PH_ADC_PIN, (unsigned long)phRawAdc, phValue);
     DBG_PRINTF("DO sample -> raw:\t%lu\tVoltage(mV)\t%lu\n",
                doReading.rawAdc,
                (unsigned long)adcRawToMillivolts(doReading.rawAdc));
