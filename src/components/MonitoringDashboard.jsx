@@ -368,12 +368,12 @@ export const MonitoringDashboardContent = ({
 
     const doValue = deviceReadings.dissolvedOxygen
     if (doValue !== null && doValue !== undefined) {
-      if (doValue < 4.0) {
+      if (doValue < 5.0) {
         alerts.push({
           key: 'do-low',
           label: 'Dissolved Oxygen',
-          severity: 'critical',
-          message: `Dissolved oxygen is critically low (${doValue.toFixed(2)} mg/L).`,
+          severity: 'warning',
+          message: `Dissolved oxygen is below recommended level (${doValue.toFixed(2)} mg/L).`,
         })
       }
     }
@@ -382,6 +382,14 @@ export const MonitoringDashboardContent = ({
   })()
   const hasCriticalAlert = severeAlerts.some((a) => a.severity === 'critical')
   const hasAnyAlert = severeAlerts.length > 0
+  const doAdvisory = (() => {
+    const doValue = deviceReadings?.dissolvedOxygen
+    if (doValue === null || doValue === undefined) return null
+    if (doValue >= 10 && doValue <= 12) {
+      return `Dissolved oxygen is ${doValue.toFixed(2)} mg/L — outside the optimal range (5-9 mg/L) but still acceptable.`
+    }
+    return null
+  })()
 
   const nextCollection = esp32Connected ? new Date(now.getTime() + 10000) : null
   const nextTime = nextCollection ? nextCollection.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'
@@ -828,6 +836,22 @@ export const MonitoringDashboardContent = ({
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {doAdvisory && (
+          <div style={{
+            marginBottom: '1.2rem',
+            borderRadius: '12px',
+            border: '1px solid #93c5fd',
+            background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+            boxShadow: '0 6px 18px rgba(59, 130, 246, 0.12)',
+            padding: '0.85rem 1rem',
+            color: '#1e3a8a',
+            fontSize: '0.85rem',
+            fontWeight: '600'
+          }}>
+            <strong>DO Advisory:</strong> {doAdvisory}
           </div>
         )}
 

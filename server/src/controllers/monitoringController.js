@@ -379,3 +379,85 @@ export const getLatestParameters = async (req, res, next) => {
   }
 }
 
+const csvColumns = [
+  { key: 'id', label: 'id' },
+  { key: 'cycle_id', label: 'cycle_id' },
+  { key: 'recorded_at', label: 'recorded_timestamp' },
+  { key: 'recorded_date', label: 'recorded_date' },
+  { key: 'recorded_time', label: 'recorded_time' },
+  { key: 'cycle_start_date', label: 'cycle_start_date' },
+  { key: 'cycle_end_date', label: 'cycle_end_date' },
+  { key: 'water_temperature', label: 'water_temperature' },
+  { key: 'dissolved_oxygen', label: 'dissolved_oxygen' },
+  { key: 'ph_level', label: 'ph_level' },
+  { key: 'number_of_breeders', label: 'number_of_breeders' },
+  { key: 'breeder_ratio', label: 'breeder_ratio' },
+  { key: 'feed_allocation', label: 'feed_allocation' },
+  { key: 'weather_temperature', label: 'weather_temperature' },
+  { key: 'weather_humidity', label: 'weather_humidity' },
+  { key: 'weather_condition', label: 'weather_condition' },
+  { key: 'weather_wind_speed', label: 'weather_wind_speed' },
+  { key: 'total_fry_produced', label: 'total_fry_produced' },
+  { key: 'harvest_date', label: 'harvest_date' },
+  { key: 'notes', label: 'notes' },
+  { key: 'created_at', label: 'created_at' },
+  { key: 'updated_at', label: 'updated_at' },
+]
+
+const toCsvCell = (value) => {
+  if (value === null || value === undefined) return ''
+  const text = String(value)
+  const escaped = text.replace(/"/g, '""')
+  return `"${escaped}"`
+}
+
+export const exportMonitoringCsv = async (req, res, next) => {
+  try {
+    const { cycleId, startDate, endDate } = req.query
+
+    let sql = `
+      SELECT
+        *,
+        TO_CHAR(recorded_at, 'YYYY-MM-DD') AS recorded_date,
+        TO_CHAR(recorded_at, 'HH24:MI:SS') AS recorded_time
+      FROM monitoring_parameters
+      WHERE 1=1
+    `
+    const params = []
+    let paramIndex = 1
+
+    if (cycleId) {
+      sql += ` AND cycle_id = $${paramIndex}`
+      params.push(cycleId)
+      paramIndex++
+    }
+
+    if (startDate) {
+      sql += ` AND recorded_at >= $${paramIndex}`
+      params.push(startDate)
+      paramIndex++
+    }
+
+    if (endDate) {
+      sql += ` AND recorded_at <= $${paramIndex}`
+      params.push(endDate)
+      paramIndex++
+    }
+
+    sql += ` ORDER BY recorded_at DESC`
+
+    const result = await query(sql, params)
+    const header = csvColumns.map((col) => col.label).join(',')
+    const rows = result.rows.map((row) =>
+      csvColumns.map((col) => toCsvCell(row[col.key])).join(',')
+    )
+    const csv = [header, ...rows].join('\n')
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="monitoring-data.csv"')
+    res.status(200).send(csv)
+  } catch (error) {
+    next(error)
+  }
+}
+

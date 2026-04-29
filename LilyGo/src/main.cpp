@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <OneWire.h>
@@ -23,21 +22,13 @@
 #define DBG_PRINTF(...)
 #endif
 
-const char *WIFI_SSID = "Candog";
-const char *WIFI_PASSWORD = "Qwerty12345-";
+const char *WIFI_SSID = "BTPT-5gP7";
+const char *WIFI_PASSWORD = "12345678";
 
-WiFiMulti wifiMulti;
-
-// Defense mode: use fixed IP on iPhone hotspot.
-// iPhone hotspot network here is 172.20.10.0/28 (gateway 172.20.10.1).
-#ifndef WIFI_USE_IPHONE_STATIC
-#define WIFI_USE_IPHONE_STATIC 0
-#endif
-
-#if WIFI_USE_IPHONE_STATIC
-static const IPAddress WIFI_STATIC_IP(172, 20, 10, 11); // choose an unused host in /28
-static const IPAddress WIFI_GATEWAY(172, 20, 10, 1);
-static const IPAddress WIFI_SUBNET(255, 255, 255, 240);
+// ESP32 static Wi-Fi IP configuration (same subnet as Pi eth0/API).
+static const IPAddress WIFI_STATIC_IP(192, 168, 50, 160);
+static const IPAddress WIFI_GATEWAY(192, 168, 50, 1);
+static const IPAddress WIFI_SUBNET(255, 255, 255, 0);
 static const IPAddress WIFI_DNS1(8, 8, 8, 8);
 static const IPAddress WIFI_DNS2(1, 1, 1, 1);
 
@@ -45,17 +36,13 @@ static void applyStaticWiFiConfig()
 {
   if (!WiFi.config(WIFI_STATIC_IP, WIFI_GATEWAY, WIFI_SUBNET, WIFI_DNS1, WIFI_DNS2))
   {
-    DBG_PRINTLN("[WiFi] Static IP config failed; will continue with DHCP behavior.");
+    DBG_PRINTLN("[WiFi] Static IP config failed.");
   }
   else
   {
-    DBG_PRINTF("[WiFi] Static IP target: %s  gw=%s  mask=%s\n",
-               WIFI_STATIC_IP.toString().c_str(),
-               WIFI_GATEWAY.toString().c_str(),
-               WIFI_SUBNET.toString().c_str());
+    DBG_PRINTF("[WiFi] Static IP configured: %s\n", WIFI_STATIC_IP.toString().c_str());
   }
 }
-#endif
 
 #define WIFI_CHECK_INTERVAL_MS 5000UL
 #define WIFI_RECONNECT_BASE_MS 2000UL
@@ -82,7 +69,7 @@ static unsigned long wifiReconnectBackoffMs()
 
 
 #ifndef FISHFARM_API_URL
-#define FISHFARM_API_URL "http://192.168.1.9:4000/api/monitoring"
+#define FISHFARM_API_URL "http://192.168.50.2:4000/api/monitoring"
 #endif
 
 const unsigned long SAMPLE_INTERVAL_MS = 10000UL;
@@ -495,21 +482,6 @@ void printAddress(DeviceAddress deviceAddress)
   }
 }
 
-static void registerWifiNetworks()
-{
-  static bool registered = false;
-  if (registered)
-    return;
-#if WIFI_USE_IPHONE_STATIC
-  // Single SSID + static IP; do not mix with home Wi‑Fi or quick-reconnect will
-  // rejoin the last stored AP (e.g. Candog) from NVS.
-  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
-#else
-  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
-#endif
-  registered = true;
-}
-
 void printWifiStatus()
 {
   const wl_status_t s = WiFi.status();
@@ -529,82 +501,117 @@ void printWifiStatus()
   }
 }
 
-bool smartWiFiConnect()
+static const char *wifiStatusName(wl_status_t s)
 {
-  registerWifiNetworks();
-
-  if (WiFi.status() == WL_CONNECTED)
+  switch (s)
   {
-#if WIFI_USE_IPHONE_STATIC
-    if (WiFi.SSID() != String(WIFI_SSID))
+  case WL_IDLE_STATUS:
+    return "IDLE";
+  case WL_NO_SSID_AVAIL:
+    return "NO_SSID_AVAIL";
+  case WL_SCAN_COMPLETED:
+    return "SCAN_COMPLETED";
+  case WL_CONNECTED:
+    return "CONNECTED";
+  case WL_CONNECT_FAILED:
+    return "CONNECT_FAILED";
+  case WL_CONNECTION_LOST:
+    return "CONNECTION_LOST";
+  case WL_DISCONNECTED:
+    return "DISCONNECTED";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+static bool waitForWiFiConnected(unsigned long timeoutMs, const char *phase)
+{
+  const unsigned long t0 = millis();
+  unsigned long lastLog = 0;
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs)
+  {
+    delay(100);
+    const unsigned long now = millis();
+    if (now - lastLog >= 2000UL)
     {
-      DBG_PRINTF("[WiFi] On wrong AP \"%s\" (want \"%s\"); disconnect + erase stored AP\n",
-                 WiFi.SSID().c_str(), WIFI_SSID);
-      WiFi.disconnect(true, true);
-      delay(200);
-    }
-    else
-#endif
-    {
-      wifiReconnectFailCount = 0;
-      return true;
+      const wl_status_t s = WiFi.status();
+      DBG_PRINTF("[WiFi] %s... status=%s (%d)\n", phase, wifiStatusName(s), (int)s);
+      lastLog = now;
     }
   }
+  return WiFi.status() == WL_CONNECTED;
+}
 
+static void logScanResults()
+{
+  const int n = WiFi.scanNetworks(false, true);
+  DBG_PRINTF("[WiFi] scan found %d AP(s)\n", n);
+  for (int i = 0; i < n; i++)
+  {
+    DBG_PRINTF("[WiFi]   %2d) SSID=\"%s\" RSSI=%d dBm CH=%d\n",
+               i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+  }
+}
+
+static bool connectToConfiguredSsid(const char *ssid, const char *password, unsigned long timeoutMs, const char *phase)
+{
+  DBG_PRINTF("[WiFi] Trying SSID \"%s\"...\n", ssid);
+  WiFi.begin(ssid, password);
+  if (waitForWiFiConnected(timeoutMs, phase))
+  {
+    DBG_PRINTF("[WiFi] Connected to \"%s\"\n", ssid);
+    return true;
+  }
+  return false;
+}
+
+bool smartWiFiConnect()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    wifiReconnectFailCount = 0;
+    return true;
+  }
+
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(WIFI_PS_NONE);
-#if WIFI_USE_IPHONE_STATIC
   applyStaticWiFiConfig();
-#endif
 
-#if !WIFI_USE_IPHONE_STATIC
   DBG_PRINTLN("[WiFi] Quick reconnect (same AP)...");
-  WiFi.reconnect();
-  {
-    const unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_QUICK_RECONNECT_WAIT_MS)
-      delay(100);
-  }
+  bool connected = connectToConfiguredSsid(
+      WIFI_SSID, WIFI_PASSWORD, WIFI_QUICK_RECONNECT_WAIT_MS, "quick connect");
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (connected && WiFi.status() == WL_CONNECTED)
   {
     wifiReconnectFailCount = 0;
     DBG_PRINT("[WiFi] OK (quick). SSID: ");
     DBG_PRINTLN(WiFi.SSID());
     return true;
   }
-#endif
 
-  DBG_PRINTLN("[WiFi] Full reconnect via WiFiMulti...");
-#if WIFI_USE_IPHONE_STATIC
-  // true, true: drop link and clear stored SSID so we never auto-rejoin old AP.
+  DBG_PRINTLN("[WiFi] Full reconnect via WiFi.begin()...");
   WiFi.disconnect(true, true);
-#else
-  WiFi.disconnect(true);
-#endif
-  delay(200);
+  delay(300);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(WIFI_PS_NONE);
-#if WIFI_USE_IPHONE_STATIC
   applyStaticWiFiConfig();
-#endif
 
-  int tries = 0;
-  while (wifiMulti.run() != WL_CONNECTED && tries < WIFI_FULL_CONNECT_TRIES)
-  {
-    delay(WIFI_FULL_CONNECT_STEP_MS);
-    tries++;
-  }
+  connected = connectToConfiguredSsid(
+      WIFI_SSID, WIFI_PASSWORD, WIFI_FULL_CONNECT_TRIES * WIFI_FULL_CONNECT_STEP_MS, "full connect");
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (connected && WiFi.status() == WL_CONNECTED)
   {
     wifiReconnectFailCount = 0;
     return true;
   }
 
   wifiReconnectFailCount++;
+  const wl_status_t s = WiFi.status();
+  DBG_PRINTF("[WiFi] Final status: %s (%d)\n", wifiStatusName(s), (int)s);
+  logScanResults();
   DBG_PRINTF("[WiFi] Failed (fail count=%u, next backoff=%lu ms)\n",
              wifiReconnectFailCount, wifiReconnectBackoffMs());
   return false;

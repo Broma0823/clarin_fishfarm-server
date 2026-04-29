@@ -8,11 +8,13 @@ import {
   deleteCycle,
   getLatestParameters,
   endCycle,
+  exportMonitoringCsv,
 } from '../controllers/monitoringController.js'
 
 const router = Router()
 
 router.get('/', listMonitoringParameters)
+router.get('/export.csv', exportMonitoringCsv)
 router.get('/latest', getLatestParameters)
 router.get('/:id', getMonitoringParameter)
 router.post('/', createMonitoringParameter)

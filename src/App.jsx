@@ -1157,7 +1157,11 @@ function App() {
   }
 
   return (
-    <div className={`screen dashboard-screen${postLoginFx ? ' dashboard-screen--enter' : ''}`}>
+    <div
+      className={`screen dashboard-screen${postLoginFx ? ' dashboard-screen--enter' : ''}${
+        sidebarOpen ? '' : ' dashboard-screen--sidebar-collapsed'
+      }`}
+    >
       <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
@@ -1176,12 +1180,9 @@ function App() {
           <button
             type="button"
             className="sidebar-toggle"
-            onClick={() => {
-              setActivePanel('monitoring')
-              setShowCycleSummary(false)
-              setShowCyclesList(false)
-            }}
-            title="Go to monitoring"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -1196,7 +1197,12 @@ function App() {
           <button
             type="button"
             className={activePanel === 'monitoring' ? 'menu-item active' : 'menu-item'}
-            onClick={() => setActivePanel('monitoring')}
+            onClick={() => {
+              setActivePanel('monitoring')
+              setShowCycleSummary(false)
+              setShowCyclesList(false)
+              setSelectedCycleForSummary(null)
+            }}
             title="Monitoring Dashboard"
           >
             <span className="menu-item__icon" aria-hidden="true">
@@ -1519,7 +1525,10 @@ function App() {
           />
         )}
 
-        {activePanel === 'monitoring' && showCycleSummary && !showCyclesList && (
+        {activePanel === 'monitoring' &&
+          showCycleSummary &&
+          !showCyclesList &&
+          selectedCycleForSummary && (
           <CycleSummaryContent
             cycleId={selectedCycleForSummary}
             onBack={() => {
