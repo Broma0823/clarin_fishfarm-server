@@ -1,0 +1,23 @@
+erDiagram
+  MONITORING_PARAMETERS {
+    int id PK
+    text cycle_id
+    date cycle_start_date
+    date cycle_end_date
+    numeric water_temperature
+    numeric dissolved_oxygen
+    numeric ph_level
+    int number_of_breeders
+    text breeder_ratio
+    numeric feed_allocation
+    numeric weather_temperature
+    int weather_humidity
+    text weather_condition
+    numeric weather_wind_speed
+    timestamptz recorded_at
+    text notes
+    int total_fry_produced
+    date harvest_date
+    timestamptz created_at
+    timestamptz updated_at
+  }

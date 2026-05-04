@@ -1,0 +1,36 @@
+erDiagram
+  direction LR
+  BENEFICIARIES {
+    int id PK
+    text excel_id "UNIQUE"
+    text classification
+    text name
+    text gender
+    text barangay
+    text municipality
+    text contact
+    text species
+    bigint quantity
+    text quantity_unit "pcs|kls"
+    numeric cost
+    text implementation_type
+    text satisfaction
+    date date_implemented
+    timestamptz created_at
+  }
+
+  BENEFICIARY_DISTRIBUTIONS {
+    int id PK
+    int beneficiary_id FK
+    text excel_id "UNIQUE"
+    text species
+    bigint quantity
+    text quantity_unit "pcs|kls"
+    numeric cost
+    text implementation_type
+    text satisfaction
+    date date_implemented
+    timestamptz created_at
+  }
+
+  BENEFICIARIES ||--o{ BENEFICIARY_DISTRIBUTIONS : beneficiary_id

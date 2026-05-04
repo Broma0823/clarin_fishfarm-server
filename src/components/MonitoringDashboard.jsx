@@ -2,6 +2,35 @@
 // It will be integrated into App.jsx
 import { useState, useEffect } from 'react'
 
+const TIME_INTERVAL_OPTIONS = [
+  { label: '10 min', valueMs: 10 * 60 * 1000 },
+  { label: '30 min', valueMs: 30 * 60 * 1000 },
+  { label: '1 hour', valueMs: 60 * 60 * 1000 },
+]
+
+const TIME_WINDOW_OPTIONS = [
+  { label: '30 min', valueMs: 30 * 60 * 1000 },
+  { label: '1 hour', valueMs: 60 * 60 * 1000 },
+  { label: '6 hours', valueMs: 6 * 60 * 60 * 1000 },
+  { label: '24 hours', valueMs: 24 * 60 * 60 * 1000 },
+]
+
+const SENSOR_METRIC_OPTIONS = [
+  { key: 'all', label: 'All Parameters', color: '#334155' },
+  { key: 'waterTemperature', label: 'Water Temperature (°C)', color: '#ef4444' },
+  { key: 'phLevel', label: 'pH Level', color: '#8b5cf6' },
+  { key: 'dissolvedOxygen', label: 'Dissolved Oxygen (mg/L)', color: '#06b6d4' },
+]
+
+const formatChartTime = (ts) =>
+  new Date(ts).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+const floorToInterval = (ts, intervalMs) => Math.floor(ts / intervalMs) * intervalMs
+
 // Helper function to check parameter status
 const getParameterStatus = (value, min, max) => {
   if (value === null || value === undefined) return {
@@ -297,6 +326,9 @@ export const MonitoringDashboardContent = ({
 }) => {
   const [currentTimeState, setCurrentTimeState] = useState(new Date())
   const [alertsEnabled, setAlertsEnabled] = useState(true)
+  const [chartMetric, setChartMetric] = useState('waterTemperature')
+  const [chartIntervalMs, setChartIntervalMs] = useState(5 * 60 * 1000)
+  const [chartWindowMs, setChartWindowMs] = useState(60 * 60 * 1000)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTimeState(new Date()), 1000)
@@ -397,7 +429,7 @@ export const MonitoringDashboardContent = ({
 
   // Filter parameters by cycle ID
   const filteredParameters = currentCycleId
-    ? monitoringParameters.filter(p => p.cycle_id === currentCycleId)
+    ? monitoringParameters.filter((p) => (p.cycleId || p.cycle_id) === currentCycleId)
     : monitoringParameters
 
   const storedSensorRows = filteredParameters
@@ -407,6 +439,135 @@ export const MonitoringDashboardContent = ({
       p.dissolvedOxygen !== null && p.dissolvedOxygen !== undefined
     )
     .slice(0, 15)
+
+  const SENSOR_KEYS = ['waterTemperature', 'phLevel', 'dissolvedOxygen']
+  const selectedMetricKeys = chartMetric === 'all' ? SENSOR_KEYS : [chartMetric]
+  const selectedSeriesMeta = SENSOR_METRIC_OPTIONS.filter(
+    (m) => m.key !== 'all' && selectedMetricKeys.includes(m.key)
+  )
+
+  const timelineCutoff = now.getTime() - chartWindowMs
+  const timelineAllRows = filteredParameters
+    .filter((row) => row.recordedAt || row.recorded_at)
+    .map((row) => {
+      const ts = new Date(row.recordedAt || row.recorded_at).getTime()
+      return Number.isNaN(ts)
+        ? null
+        : {
+            ts,
+            waterTemperature: row.waterTemperature ?? row.water_temperature ?? null,
+            phLevel: row.phLevel ?? row.ph_level ?? null,
+            dissolvedOxygen: row.dissolvedOxygen ?? row.dissolved_oxygen ?? null,
+          }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts)
+
+  const timelineRawRows = timelineAllRows.filter((row) => row.ts >= timelineCutoff)
+  const isUsingFallbackHistory = timelineRawRows.length === 0 && timelineAllRows.length > 0
+  const timelineRowsForChart = isUsingFallbackHistory
+    ? timelineAllRows.slice(-Math.max(20, Math.floor(chartWindowMs / chartIntervalMs)))
+    : timelineRawRows
+
+  const bucketedMap = new Map()
+  timelineRowsForChart.forEach((row) => {
+    const bucketTs = Math.floor(row.ts / chartIntervalMs) * chartIntervalMs
+    const existing = bucketedMap.get(bucketTs) || {
+      ts: bucketTs,
+      waterTemperature: [],
+      phLevel: [],
+      dissolvedOxygen: [],
+    }
+    if (row.waterTemperature !== null && row.waterTemperature !== undefined) existing.waterTemperature.push(Number(row.waterTemperature))
+    if (row.phLevel !== null && row.phLevel !== undefined) existing.phLevel.push(Number(row.phLevel))
+    if (row.dissolvedOxygen !== null && row.dissolvedOxygen !== undefined) existing.dissolvedOxygen.push(Number(row.dissolvedOxygen))
+    bucketedMap.set(bucketTs, existing)
+  })
+
+  const chartPoints = [...bucketedMap.values()]
+    .sort((a, b) => a.ts - b.ts)
+    .map((bucket) => {
+      const toAvg = (values) =>
+        values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null
+      return {
+        ts: bucket.ts,
+        waterTemperature: toAvg(bucket.waterTemperature),
+        phLevel: toAvg(bucket.phLevel),
+        dissolvedOxygen: toAvg(bucket.dissolvedOxygen),
+      }
+    })
+
+  const chartStartTs = chartPoints.length ? chartPoints[0].ts : null
+  const chartEndTs = chartPoints.length ? chartPoints[chartPoints.length - 1].ts : null
+
+  const chartSvgWidth = 860
+  const chartSvgHeight = 260
+  const chartPadding = 36
+  const chartPlotW = chartSvgWidth - chartPadding * 2
+  const chartPlotH = chartSvgHeight - chartPadding * 2
+
+  const selectedValues = chartPoints.flatMap((point) =>
+    selectedMetricKeys
+      .map((metricKey) => point[metricKey])
+      .filter((v) => v !== null && v !== undefined)
+  )
+  const hasChartData = selectedValues.length > 0
+  const chartMin = hasChartData ? Math.min(...selectedValues) : 0
+  const chartMax = hasChartData ? Math.max(...selectedValues) : 0
+  const rawSpan = Math.max(0, chartMax - chartMin)
+  const padAmount = hasChartData
+    ? (rawSpan > 0 ? rawSpan * 0.08 : Math.max(Math.abs(chartMax) * 0.05, 0.1))
+    : 0.1
+  const axisMin = chartMin - padAmount
+  const axisMax = chartMax + padAmount
+  const axisSpan = Math.max(0.0001, axisMax - axisMin)
+  const axisPrecision = chartMetric === 'dissolvedOxygen' ? 3 : 2
+  const fixedYTicks = [0, 5, 10, 15, 20, 25, 30]
+  const yAxisMin = 0
+  const yAxisMax = 30
+  const yAxisSpan = yAxisMax - yAxisMin
+
+  const toChartX = (idx) =>
+    chartPoints.length <= 1
+      ? chartPadding + chartPlotW / 2
+      : chartPadding + (idx / (chartPoints.length - 1)) * chartPlotW
+
+  const toChartY = (value) =>
+    chartPadding +
+    chartPlotH -
+    ((Math.max(yAxisMin, Math.min(yAxisMax, value)) - yAxisMin) / yAxisSpan) * chartPlotH
+
+  const chartSeries = selectedSeriesMeta
+    .map((meta) => {
+      const points = chartPoints
+        .map((point, idx) => ({ idx, value: point[meta.key] }))
+        .filter((p) => p.value !== null && p.value !== undefined)
+      const polyline = points.map((point) => `${toChartX(point.idx)},${toChartY(point.value)}`).join(' ')
+      const latest = points.length ? points[points.length - 1] : null
+      return { ...meta, points, polyline, latest }
+    })
+    .filter((series) => series.points.length > 0)
+
+  const latestPoint = chartPoints.length ? chartPoints[chartPoints.length - 1] : null
+  const latestPointTs = latestPoint?.ts ? new Date(latestPoint.ts).toLocaleString() : '—'
+  const detailRows = chartPoints
+    .filter((point) =>
+      selectedMetricKeys.some((metricKey) => point[metricKey] !== null && point[metricKey] !== undefined)
+    )
+    .slice(-10)
+    .reverse()
+
+  const chartXTicks = (() => {
+    if (!chartStartTs || !chartEndTs) return []
+    const start = floorToInterval(chartStartTs, chartIntervalMs)
+    const end = floorToInterval(chartEndTs, chartIntervalMs)
+    const ticks = []
+    for (let t = start; t <= end; t += chartIntervalMs) {
+      ticks.push(t)
+      if (ticks.length > 120) break
+    }
+    return ticks
+  })()
 
   return (
     <section className="panel" style={{ position: 'relative' }}>
@@ -997,11 +1158,206 @@ export const MonitoringDashboardContent = ({
       {/* Stored Sensor Data Table (PostgreSQL) */}
       <div style={{
         background: 'white',
-        borderRadius: '12px',
-        padding: '1.5rem',
+        borderRadius: '16px',
+        padding: '1.65rem',
         marginBottom: '2rem',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.08)'
       }}>
+        <div style={{ marginBottom: '1.2rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700', color: '#0f172a', letterSpacing: '0.01em' }}>
+            Sensor Time Graph
+          </h3>
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem', padding: '0.75rem', borderRadius: '12px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.78rem', color: '#334155', fontWeight: '700' }}>
+            Metric
+            <select
+              value={chartMetric}
+              onChange={(e) => setChartMetric(e.target.value)}
+              style={{ minWidth: '190px', padding: '0.48rem 0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'white', color: '#0f172a' }}
+            >
+              {SENSOR_METRIC_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.78rem', color: '#334155', fontWeight: '700' }}>
+            Time interval
+            <select
+              value={String(chartIntervalMs)}
+              onChange={(e) => setChartIntervalMs(Number(e.target.value))}
+              style={{ minWidth: '130px', padding: '0.48rem 0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'white', color: '#0f172a' }}
+            >
+              {TIME_INTERVAL_OPTIONS.map((option) => (
+                <option key={option.valueMs} value={String(option.valueMs)}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.78rem', color: '#334155', fontWeight: '700' }}>
+            Total time
+            <select
+              value={String(chartWindowMs)}
+              onChange={(e) => setChartWindowMs(Number(e.target.value))}
+              style={{ minWidth: '130px', padding: '0.48rem 0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'white', color: '#0f172a' }}
+            >
+              {TIME_WINDOW_OPTIONS.map((option) => (
+                <option key={option.valueMs} value={String(option.valueMs)}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div style={{ border: '1px solid #dbe3ef', borderRadius: '14px', background: 'linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%)', padding: '0.8rem', marginBottom: '1.4rem' }}>
+          {isUsingFallbackHistory && (
+            <p style={{ margin: '0.4rem 0.5rem', fontSize: '0.78rem', color: '#7c2d12' }}>
+              Showing latest sensor data.
+            </p>
+          )}
+          {!hasChartData ? (
+            <p style={{ margin: '0.5rem', fontSize: '0.85rem', color: '#64748b' }}>
+              No chartable points in this range yet. Try a longer total time.
+            </p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap', margin: '0.35rem 0.45rem 0.9rem' }}>
+                {selectedSeriesMeta.map((metric) => {
+                  const value = latestPoint?.[metric.key]
+                  return (
+                    <div key={metric.key} style={{ padding: '0.4rem 0.65rem', borderRadius: '999px', background: `${metric.color}1f`, border: `1px solid ${metric.color}66`, fontSize: '0.78rem', color: '#334155', fontWeight: '700' }}>
+                      <span style={{ color: metric.color }}>{metric.label}:</span>{' '}
+                      {value !== null && value !== undefined ? Number(value).toFixed(metric.key === 'dissolvedOxygen' ? 3 : 2) : '—'}
+                    </div>
+                  )
+                })}
+                <div style={{ padding: '0.4rem 0.65rem', borderRadius: '999px', background: '#e2e8f044', border: '1px solid #94a3b866', fontSize: '0.78rem', color: '#475569', fontWeight: '700' }}>
+                  Time: {latestPointTs}
+                </div>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <svg viewBox={`0 0 ${chartSvgWidth} ${chartSvgHeight}`} width="100%" height="280" role="img" aria-label="Sensor time chart">
+                  {[0, 1, 2, 3, 4].map((tick) => {
+                    const y = chartPadding + (tick / 4) * chartPlotH
+                    return (
+                      <line key={`grid-${tick}`} x1={chartPadding} y1={y} x2={chartSvgWidth - chartPadding} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" />
+                    )
+                  })}
+                  <line x1={chartPadding} y1={chartPadding} x2={chartPadding} y2={chartSvgHeight - chartPadding} stroke="#94a3b8" />
+                  <line x1={chartPadding} y1={chartSvgHeight - chartPadding} x2={chartSvgWidth - chartPadding} y2={chartSvgHeight - chartPadding} stroke="#94a3b8" />
+
+                  {fixedYTicks.map((tickValue) => (
+                    <text
+                      key={`y-tick-${tickValue}`}
+                      x={chartPadding - 6}
+                      y={toChartY(tickValue) + 3}
+                      fontSize="10"
+                      fill="#64748b"
+                      textAnchor="end"
+                    >
+                      {tickValue}
+                    </text>
+                  ))}
+
+                  {chartXTicks.map((tickTs, idx) => (
+                    <text
+                      key={`x-tick-${idx}`}
+                      x={
+                        chartStartTs === chartEndTs
+                          ? chartPadding + chartPlotW / 2
+                          : chartPadding + ((tickTs - chartStartTs) / Math.max(1, chartEndTs - chartStartTs)) * chartPlotW
+                      }
+                      y={chartSvgHeight - chartPadding + 15}
+                      fontSize="10"
+                      fill="#64748b"
+                      textAnchor="middle"
+                    >
+                      {formatChartTime(tickTs)}
+                    </text>
+                  ))}
+
+                  {chartSeries.map((series) => (
+                    <g key={series.key}>
+                      <polyline fill="none" stroke={series.color} strokeWidth="2.5" points={series.polyline} />
+                      {series.latest && (
+                        <circle
+                          cx={toChartX(series.latest.idx)}
+                          cy={toChartY(series.latest.value)}
+                          r="4.5"
+                          fill={series.color}
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                        />
+                      )}
+                      {series.latest && (
+                        <text
+                          x={chartPadding - 6}
+                          y={toChartY(series.latest.value) - 6}
+                          fontSize="10"
+                          fill={series.color}
+                          fontWeight="700"
+                          textAnchor="end"
+                        >
+                          {series.latest.value.toFixed(series.key === 'dissolvedOxygen' ? 3 : 2)}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+                  <text x={chartSvgWidth / 2} y={chartSvgHeight - 6} fontSize="11" fill="#475569" textAnchor="middle" fontWeight="600">
+                    Time
+                  </text>
+                  <text x={12} y={chartPadding - 10} fontSize="11" fill="#475569" fontWeight="600">
+                    Sensor Value
+                  </text>
+                </svg>
+              </div>
+              <div style={{ display: 'flex', gap: '0.9rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+                {chartSeries.map((series) => (
+                  <div key={`legend-${series.key}`} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.76rem', color: '#475569', fontWeight: '600' }}>
+                    <span style={{ width: '12px', height: '3px', borderRadius: '2px', background: series.color }}></span>
+                    {series.label}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#475569', marginTop: '0.45rem', fontWeight: '600' }}>
+                <span>{chartStartTs ? formatChartTime(chartStartTs) : '—'}</span>
+                <span>
+                  Min {chartMin.toFixed(axisPrecision)} | Max {chartMax.toFixed(axisPrecision)}
+                </span>
+                <span>{chartEndTs ? formatChartTime(chartEndTs) : '—'}</span>
+              </div>
+
+              {detailRows.length > 0 && (
+                <div style={{ marginTop: '0.8rem', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #dbe2ea' }}>
+                        <th style={{ textAlign: 'left', padding: '0.45rem 0.55rem', fontSize: '0.75rem', color: '#475569' }}>Time</th>
+                        <th style={{ textAlign: 'right', padding: '0.45rem 0.55rem', fontSize: '0.75rem', color: '#475569' }}>Temp (°C)</th>
+                        <th style={{ textAlign: 'right', padding: '0.45rem 0.55rem', fontSize: '0.75rem', color: '#475569' }}>pH</th>
+                        <th style={{ textAlign: 'right', padding: '0.45rem 0.55rem', fontSize: '0.75rem', color: '#475569' }}>DO (mg/L)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailRows.map((row) => (
+                        <tr key={`detail-${row.ts}`} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '0.42rem 0.55rem', fontSize: '0.78rem', color: '#1f2937' }}>{new Date(row.ts).toLocaleString()}</td>
+                          <td style={{ padding: '0.42rem 0.55rem', textAlign: 'right', fontSize: '0.78rem', color: '#1f2937' }}>{row.waterTemperature !== null && row.waterTemperature !== undefined ? Number(row.waterTemperature).toFixed(2) : '—'}</td>
+                          <td style={{ padding: '0.42rem 0.55rem', textAlign: 'right', fontSize: '0.78rem', color: '#1f2937' }}>{row.phLevel !== null && row.phLevel !== undefined ? Number(row.phLevel).toFixed(2) : '—'}</td>
+                          <td style={{ padding: '0.42rem 0.55rem', textAlign: 'right', fontSize: '0.78rem', color: '#1f2937' }}>{row.dissolvedOxygen !== null && row.dissolvedOxygen !== undefined ? Number(row.dissolvedOxygen).toFixed(3) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
         <div style={{ marginBottom: '1rem' }}>
           <h3 style={{
             margin: 0,
