@@ -27,11 +27,9 @@ const resolveKnownLogin = (login) =>
 
 const resolveApiBaseUrl = () => {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim()
-  if (configured) return configured
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    return `http://${window.location.hostname}:4000/api`
-  }
-  return 'http://localhost:4000/api'
+  if (configured) return configured.replace(/\/+$/, '')
+  // Same-origin API keeps the app working in offline LAN setups (with local backend).
+  return '/api'
 }
 
 const API_BASE_URL = resolveApiBaseUrl()
