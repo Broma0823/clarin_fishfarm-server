@@ -1,0 +1,35 @@
+Trial,Time,Temperature_C,pH,DO_mg_L,Expected_Alert,Actual_Alert,Status
+1,1:30 PM,33.00,8.71,7.22,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+2,1:40 PM,33.00,8.76,8.08,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+3,1:50 PM,33.25,9.84,7.66,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+4,2:00 PM,33.00,8.88,8.29,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+5,2:10 PM,33.00,9.09,7.56,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+6,2:20 PM,33.00,8.64,10.13,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+7,2:30 PM,33.50,9.02,9.11,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+8,2:40 PM,33.50,9.52,8.59,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+9,2:50 PM,33.25,9.32,10.17,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+10,3:00 PM,33.25,9.25,9.77,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+11,3:10 PM,33.25,10.07,10.03,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+12,3:20 PM,33.25,9.25,9.23,High Temp | Too Alkaline | High DO,High Temp | Too Alkaline | High DO,Pass
+13,3:30 PM,33.00,8.36,9.14,High Temp | High DO,High Temp | High DO,Pass
+14,3:40 PM,33.00,8.15,8.57,High Temp,High Temp,Pass
+15,3:50 PM,32.75,9.13,8.07,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+16,4:00 PM,33.00,8.44,8.98,High Temp,High Temp,Pass
+17,4:10 PM,33.00,8.46,8.29,High Temp,High Temp,Pass
+18,4:20 PM,33.00,7.97,8.14,High Temp,High Temp,Pass
+19,4:30 PM,33.00,7.44,8.33,High Temp,High Temp,Pass
+20,4:40 PM,33.00,8.89,7.97,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+21,4:50 PM,33.00,8.65,7.80,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+22,5:00 PM,33.00,8.75,7.50,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+23,5:10 PM,33.00,9.18,7.15,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+24,5:20 PM,32.75,8.51,6.75,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+25,5:30 PM,32.75,8.89,6.47,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+26,5:40 PM,32.50,8.53,6.26,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+27,5:50 PM,32.50,7.99,6.33,High Temp,High Temp,Pass
+28,6:00 PM,32.50,8.33,6.33,High Temp,High Temp,Pass
+29,6:10 PM,32.25,8.23,6.07,High Temp,High Temp,Pass
+30,6:20 PM,32.25,7.77,5.96,High Temp,High Temp,Pass
+31,6:30 PM,32.25,8.78,5.75,High Temp | Too Alkaline,High Temp | Too Alkaline,Pass
+32,6:40 PM,32.25,7.87,5.70,High Temp,High Temp,Pass
+33,6:50 PM,32.00,7.89,5.47,High Temp,High Temp,Pass
+34,7:00 PM,32.00,7.68,5.51,High Temp,High Temp,Pass

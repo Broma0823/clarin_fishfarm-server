@@ -10,38 +10,41 @@
 %%    "clusterBorder": "#000000"
 %%  }
 %%}}%%
-flowchart LR
-    %% ---------- Field Layer ----------
-    subgraph FIELD["Pond / Sensor Layer"]
-        T["Water Temp Sensor (DS18B20)"]
-        PH["pH Sensor Probe"]
-        DO["Dissolved Oxygen Sensor Probe"]
-        ESP["ESP32 Controller"]
-        T --> ESP
-        PH --> ESP
-        DO --> ESP
-    end
-
-    %% ---------- Network ----------
-    NET["Wi-Fi Network"]
+flowchart TB
+    %% ---------- User ----------
+    USER["User<br/>(Laptop / Mobile<br/>Browser)"]
 
     %% ---------- Server Layer ----------
     subgraph SERVER["Raspberry Pi Server"]
-        WEB["React Frontend (:5173)"]
-        API["Express API (:4000)"]
-        DB[("PostgreSQL (bfar_db)")]
-
+        direction TB
+        WEB["React Frontend<br/>(:5173)"]
+        API["Express API<br/>(:4000)"]
+        DB[("PostgreSQL<br/>(bfar_db)")]
         WEB -->|"GET/POST"| API
         API -->|"JSON"| WEB
         API -->|"Read/Write"| DB
         DB -->|"Results"| API
     end
 
-    %% ---------- User Layer ----------
-    USER["User (Laptop / Mobile Browser)"]
+    %% ---------- Network ----------
+    NET["Wi-Fi<br/>Network"]
 
-    ESP -->|"POST /api/monitoring (every 60s)"| NET --> API
+    %% ---------- Field Layer ----------
+    subgraph FIELD["Pond / Sensor Layer"]
+        direction TB
+        T["Water Temp Sensor<br/>(DS18B20)"]
+        PH["pH Sensor<br/>Probe"]
+        DO["Dissolved Oxygen Sensor<br/>Probe"]
+        ESP["ESP32<br/>Controller"]
+        T --> ESP
+        PH --> ESP
+        DO --> ESP
+    end
+
+    %% ---------- Main vertical flow ----------
     USER -->|"Open dashboard"| WEB
+    API --> NET
+    NET -->|"POST /api/monitoring (every 60s)"| ESP
 
     %% ---------- Monochrome styling ----------
     classDef sensor fill:#ffffff,stroke:#000000,stroke-width:1px,color:#000000;
@@ -55,6 +58,5 @@ flowchart LR
     class NET network
     class USER user
     class DB database
-
     style FIELD fill:#ffffff,stroke:#000000,stroke-width:1px,color:#000000
     style SERVER fill:#ffffff,stroke:#000000,stroke-width:1px,color:#000000

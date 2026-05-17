@@ -1029,11 +1029,11 @@ export const MonitoringDashboardContent = ({
             unit="°C"
             min={20}
             max={35}
-            optimalMin={26}
+            optimalMin={27}
             optimalMax={30}
             color="#ef4444"
             description="Temperature of pond water"
-            tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 26-30°C. Too cold slows growth, too hot reduces oxygen levels."
+            tooltip="Water temperature affects fish metabolism, growth rate, and oxygen consumption. Tilapia thrive best between 27-30°C. Too cold slows growth, too hot reduces oxygen levels."
           />
           {/* pH Level Gauge */}
           <ParameterGauge

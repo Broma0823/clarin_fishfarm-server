@@ -1,0 +1,35 @@
+Trial,Date,Time,Parameter,Threshold,Actual_Value,Expected_Alert,Actual_Alert,AirTemp_C,Humidity_pct,Rainfall_mm,WindSpeed_kmh,Weather_Condition,Status
+1,2026-04-28,1:30 PM,pH,6.0 to 9.0,8.71,No Alert,No Alert,31.7,57,0.10,12.6,Light Drizzle,Pass
+2,2026-04-28,1:40 PM,pH,6.0 to 9.0,8.76,No Alert,No Alert,31.7,57,0.10,12.6,Light Drizzle,Pass
+3,2026-04-28,1:50 PM,pH,> 9.0,9.84,Water is too alkaline (pH 9.84).,Water is too alkaline (pH 9.84).,31.7,57,0.10,12.6,Light Drizzle,Pass
+4,2026-04-28,2:00 PM,pH,6.0 to 9.0,8.88,No Alert,No Alert,33.2,49,0.00,9.3,Overcast,Pass
+5,2026-04-28,2:10 PM,pH,> 9.0,9.09,Water is too alkaline (pH 9.09).,Water is too alkaline (pH 9.09).,33.2,49,0.00,9.3,Overcast,Pass
+6,2026-04-28,2:20 PM,pH,6.0 to 9.0,8.64,No Alert,No Alert,33.2,49,0.00,9.3,Overcast,Pass
+7,2026-04-28,2:30 PM,pH,> 9.0,9.02,Water is too alkaline (pH 9.02).,Water is too alkaline (pH 9.02).,33.2,49,0.00,9.3,Overcast,Pass
+8,2026-04-28,2:40 PM,pH,> 9.0,9.52,Water is too alkaline (pH 9.52).,Water is too alkaline (pH 9.52).,33.2,49,0.00,9.3,Overcast,Pass
+9,2026-04-28,2:50 PM,pH,> 9.0,9.32,Water is too alkaline (pH 9.32).,Water is too alkaline (pH 9.32).,33.2,49,0.00,9.3,Overcast,Pass
+10,2026-04-28,3:00 PM,pH,> 9.0,9.25,Water is too alkaline (pH 9.25).,Water is too alkaline (pH 9.25).,33.0,49,0.00,10.2,Overcast,Pass
+11,2026-04-28,3:10 PM,pH,> 9.0,10.07,Water is too alkaline (pH 10.07).,Water is too alkaline (pH 10.07).,33.0,49,0.00,10.2,Overcast,Pass
+12,2026-04-28,3:20 PM,pH,> 9.0,9.25,Water is too alkaline (pH 9.25).,Water is too alkaline (pH 9.25).,33.0,49,0.00,10.2,Overcast,Pass
+13,2026-04-28,3:30 PM,pH,6.0 to 9.0,8.36,No Alert,No Alert,33.0,49,0.00,10.2,Overcast,Pass
+14,2026-04-28,3:40 PM,pH,6.0 to 9.0,8.15,No Alert,No Alert,33.0,49,0.00,10.2,Overcast,Pass
+15,2026-04-28,3:50 PM,pH,> 9.0,9.13,Water is too alkaline (pH 9.13).,Water is too alkaline (pH 9.13).,33.0,49,0.00,10.2,Overcast,Pass
+16,2026-04-28,4:00 PM,pH,6.0 to 9.0,8.44,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+17,2026-04-28,4:10 PM,pH,6.0 to 9.0,8.46,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+18,2026-04-28,4:20 PM,pH,6.0 to 9.0,7.97,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+19,2026-04-28,4:30 PM,pH,6.0 to 9.0,7.44,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+20,2026-04-28,4:40 PM,pH,6.0 to 9.0,8.89,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+21,2026-04-28,4:50 PM,pH,6.0 to 9.0,8.65,No Alert,No Alert,32.3,50,0.00,12.4,Overcast,Pass
+22,2026-04-28,5:00 PM,pH,6.0 to 9.0,8.75,No Alert,No Alert,31.6,53,0.00,13.9,Overcast,Pass
+23,2026-04-28,5:10 PM,pH,> 9.0,9.18,Water is too alkaline (pH 9.18).,Water is too alkaline (pH 9.18).,31.6,53,0.00,13.9,Overcast,Pass
+24,2026-04-28,5:20 PM,pH,6.0 to 9.0,8.51,No Alert,No Alert,31.6,53,0.00,13.9,Overcast,Pass
+25,2026-04-28,5:30 PM,pH,6.0 to 9.0,8.89,No Alert,No Alert,31.6,53,0.00,13.9,Overcast,Pass
+26,2026-04-28,5:40 PM,pH,6.0 to 9.0,8.53,No Alert,No Alert,31.6,53,0.00,13.9,Overcast,Pass
+27,2026-04-28,5:50 PM,pH,6.0 to 9.0,7.99,No Alert,No Alert,31.6,53,0.00,13.9,Overcast,Pass
+28,2026-04-28,6:00 PM,pH,6.0 to 9.0,8.33,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+29,2026-04-28,6:10 PM,pH,6.0 to 9.0,8.23,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+30,2026-04-28,6:20 PM,pH,6.0 to 9.0,7.77,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+31,2026-04-28,6:30 PM,pH,6.0 to 9.0,8.78,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+32,2026-04-28,6:40 PM,pH,6.0 to 9.0,7.87,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+33,2026-04-28,6:50 PM,pH,6.0 to 9.0,7.89,No Alert,No Alert,30.0,59,0.00,13.1,Mainly Clear,Pass
+34,2026-04-28,7:00 PM,pH,6.0 to 9.0,7.68,No Alert,No Alert,28.7,65,0.00,8.8,Clear Sky,Pass

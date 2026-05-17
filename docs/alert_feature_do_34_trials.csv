@@ -1,0 +1,35 @@
+Trial,Time,Parameter,Threshold,Actual_Value,Expected_Alert,Actual_Alert,Status
+1,1:30 PM,DO,> 5 and < 9 mg/L,7.22 mg/L,No Alert,No Alert,Pass
+2,1:40 PM,DO,> 5 and < 9 mg/L,8.08 mg/L,No Alert,No Alert,Pass
+3,1:50 PM,DO,> 5 and < 9 mg/L,7.66 mg/L,No Alert,No Alert,Pass
+4,2:00 PM,DO,> 5 and < 9 mg/L,8.29 mg/L,No Alert,No Alert,Pass
+5,2:10 PM,DO,> 5 and < 9 mg/L,7.56 mg/L,No Alert,No Alert,Pass
+6,2:20 PM,DO,> 9 mg/L,10.13 mg/L,High DO,High DO,Pass
+7,2:30 PM,DO,> 9 mg/L,9.11 mg/L,High DO,High DO,Pass
+8,2:40 PM,DO,> 5 and < 9 mg/L,8.59 mg/L,No Alert,No Alert,Pass
+9,2:50 PM,DO,> 9 mg/L,10.17 mg/L,High DO,High DO,Pass
+10,3:00 PM,DO,> 9 mg/L,9.77 mg/L,High DO,High DO,Pass
+11,3:10 PM,DO,> 9 mg/L,10.03 mg/L,High DO,High DO,Pass
+12,3:20 PM,DO,> 9 mg/L,9.23 mg/L,High DO,High DO,Pass
+13,3:30 PM,DO,> 9 mg/L,9.14 mg/L,High DO,High DO,Pass
+14,3:40 PM,DO,> 5 and < 9 mg/L,8.57 mg/L,No Alert,No Alert,Pass
+15,3:50 PM,DO,> 5 and < 9 mg/L,8.07 mg/L,No Alert,No Alert,Pass
+16,4:00 PM,DO,> 5 and < 9 mg/L,8.98 mg/L,No Alert,No Alert,Pass
+17,4:10 PM,DO,> 5 and < 9 mg/L,8.29 mg/L,No Alert,No Alert,Pass
+18,4:20 PM,DO,> 5 and < 9 mg/L,8.14 mg/L,No Alert,No Alert,Pass
+19,4:30 PM,DO,> 5 and < 9 mg/L,8.33 mg/L,No Alert,No Alert,Pass
+20,4:40 PM,DO,> 5 and < 9 mg/L,7.97 mg/L,No Alert,No Alert,Pass
+21,4:50 PM,DO,> 5 and < 9 mg/L,7.80 mg/L,No Alert,No Alert,Pass
+22,5:00 PM,DO,> 5 and < 9 mg/L,7.50 mg/L,No Alert,No Alert,Pass
+23,5:10 PM,DO,> 5 and < 9 mg/L,7.15 mg/L,No Alert,No Alert,Pass
+24,5:20 PM,DO,> 5 and < 9 mg/L,6.75 mg/L,No Alert,No Alert,Pass
+25,5:30 PM,DO,> 5 and < 9 mg/L,6.47 mg/L,No Alert,No Alert,Pass
+26,5:40 PM,DO,> 5 and < 9 mg/L,6.26 mg/L,No Alert,No Alert,Pass
+27,5:50 PM,DO,> 5 and < 9 mg/L,6.33 mg/L,No Alert,No Alert,Pass
+28,6:00 PM,DO,> 5 and < 9 mg/L,6.33 mg/L,No Alert,No Alert,Pass
+29,6:10 PM,DO,> 5 and < 9 mg/L,6.07 mg/L,No Alert,No Alert,Pass
+30,6:20 PM,DO,> 5 and < 9 mg/L,5.96 mg/L,No Alert,No Alert,Pass
+31,6:30 PM,DO,> 5 and < 9 mg/L,5.75 mg/L,No Alert,No Alert,Pass
+32,6:40 PM,DO,> 5 and < 9 mg/L,5.70 mg/L,No Alert,No Alert,Pass
+33,6:50 PM,DO,> 5 and < 9 mg/L,5.47 mg/L,No Alert,No Alert,Pass
+34,7:00 PM,DO,> 5 and < 9 mg/L,5.51 mg/L,No Alert,No Alert,Pass
